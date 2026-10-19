@@ -1,0 +1,92 @@
+# exam-cli
+
+Console exam trainer in the style of a Pearson VUE exam, built for practice (training mode).
+It reads the same exam `.json` files as the Exam designer GUI.
+
+![Question](docs/screenshots/01-question.png)
+
+## Run
+
+```
+exam-cli.exe [exam.json]
+```
+
+- With a file: opens that exam (you can also drag a `.json` onto `exam-cli.exe`).
+- Without a file: opens `samples\demo.json` next to the exe, or asks for a file if it is missing.
+
+## Keys
+
+Keys act at once, there is no input prompt. They also work with a Russian keyboard layout
+(the key at the same place counts, e.g. `ф` is `A`).
+
+| Key | Action |
+|-----|--------|
+| A–D, F | choose option (E is Explain, so option E is chosen with the arrows) |
+| ↑ / ↓ | single-choice: move the selection; multiple-choice: move the `›` cursor |
+| Space | choose / toggle the option under the cursor |
+| Enter | first press checks the answer, second press goes on |
+| S | show answer (correct rows turn green) |
+| E | explain |
+| I | open the question's picture in the default viewer |
+| N / P, ← / → | next / previous question |
+| R | review all questions |
+| H | toggle help |
+| Q, Esc | quit (asks Y / N); Ctrl+C asks too, a second Ctrl+C quits |
+
+Single-choice questions start with A selected.
+After the last question, the second Enter opens the review list: every question with
+`CORRECT`, `INCORRECT` or `UNANSWERED` and a `( N Questions , M Incorrect )` total
+(unanswered counts as incorrect). In review, ↑/↓ choose, Enter opens a question, and Enter
+on an answered question brings you back to the review.
+
+## Row colors
+
+| State | Background | Right-hand label |
+|-------|------------|------------------|
+| Selected (before submit) | purple | — |
+| Chosen and correct | green | `CORRECT` |
+| Chosen and wrong | red | `INCORRECT` |
+| Correct but not chosen (after a wrong answer, or on `S`) | green | — |
+
+## Exam file
+
+JSON, one exam per file:
+
+```json
+{
+  "title": "Demo Exam",
+  "code": "DEMO-01",
+  "questions": [
+    {
+      "type": "single",
+      "text": "1 + 1 = ?",
+      "choices": [
+        { "text": "1", "correct": false },
+        { "text": "2", "correct": true }
+      ],
+      "explanation": "One plus one equals two.",
+      "image": ""
+    }
+  ]
+}
+```
+
+- `type`: `single` or `multiple`.
+- `image`: optional `data:image/png;base64,...` URL.
+- Text between two lines of ```` ``` ```` in a question is shown as code.
+
+## Build (Windows)
+
+Needs [rustup](https://rustup.rs) with the GNU toolchain (`x86_64-pc-windows-gnu`); no Visual Studio.
+
+```
+build.cmd
+```
+
+It runs the tests, builds a release and copies `exam-cli.exe` next to `build.cmd`.
+
+## Design
+
+The original spec and screenshots are in [docs/DESIGN.md](docs/DESIGN.md).
+Differences from it: written in Rust (not Python/textual), exam files are JSON (not YAML),
+Explain is `E` (not `X`), plus arrows, review and the quit question.
