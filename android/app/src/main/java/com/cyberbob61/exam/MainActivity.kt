@@ -146,7 +146,8 @@ class Session(val exam: Exam, val alwaysExplain: Boolean, val hideResults: Boole
         inReview = true
     }
 
-    fun isRight(k: Int) = checked[k] && exam.questions[k].isRight(picks[k])
+    // a chosen answer counts even if the check button was never pressed; that button only shows the result at once
+    fun isRight(k: Int) = picks[k].isNotEmpty() && exam.questions[k].isRight(picks[k])
 }
 
 class AppModel(app: Application) : AndroidViewModel(app) {
@@ -466,7 +467,7 @@ fun ReviewScreen(m: AppModel, s: Session) {
             if (s.timeUp) item { Text("Time is up.", color = RED, fontWeight = FontWeight.Bold, modifier = Modifier.padding(12.dp)) }
             itemsIndexed(s.exam.questions) { k, q ->
                 val (color, label) = when {
-                    !s.checked[k] -> Color.Gray to "UNANSWERED"
+                    s.picks[k].isEmpty() -> Color.Gray to "UNANSWERED"
                     s.isRight(k) -> GREEN to "CORRECT"
                     else -> RED to "INCORRECT"
                 }
