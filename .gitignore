@@ -2,3 +2,7 @@
 /exam-cli.exe
 /tools/llvm-dlltool.exe
 /questions/
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties
