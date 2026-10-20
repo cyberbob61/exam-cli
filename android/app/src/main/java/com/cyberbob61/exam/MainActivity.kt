@@ -148,7 +148,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var session by mutableStateOf<Session?>(null)
     var message by mutableStateOf<String?>(null)
 
-    fun setAlwaysExplain(on: Boolean) {
+    fun saveAlwaysExplain(on: Boolean) {
         alwaysExplain = on
         prefs.edit().putBoolean("alwaysExplain", on).apply()
     }
@@ -269,9 +269,9 @@ fun ExamCard(e: Entry, onPlay: () -> Unit) {
 fun OptionsCard(m: AppModel) {
     Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(6.dp)).border(1.dp, LINE, RoundedCornerShape(6.dp)).padding(12.dp)) {
         Text("Options", fontWeight = FontWeight.Bold)
-        Row(Modifier.fillMaxWidth().clickable { m.setAlwaysExplain(!m.alwaysExplain) }, verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().clickable { m.saveAlwaysExplain(!m.alwaysExplain) }, verticalAlignment = Alignment.CenterVertically) {
             Text("Always explain (with Show)", Modifier.weight(1f))
-            Switch(checked = m.alwaysExplain, onCheckedChange = { m.setAlwaysExplain(it) })
+            Switch(checked = m.alwaysExplain, onCheckedChange = { m.saveAlwaysExplain(it) })
         }
     }
 }
