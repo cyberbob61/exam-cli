@@ -49,7 +49,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderOpen
@@ -74,7 +73,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,7 +93,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.delay
 import kotlin.math.abs
 
 private val DARK = Color(0xFF1E1E1E)
@@ -119,37 +116,26 @@ class MainActivity : ComponentActivity() {
 }
 
 /** one run through an exam; lives in the view model so turning the phone keeps it */
-class Session(val exam: Exam, val alwaysExplain: Boolean, val hideResults: Boolean) {
+class Session(val exam: Exam, val alwaysExplain: Boolean) {
     val n = exam.questions.size
     var i by mutableIntStateOf(0)
     val picks = mutableStateListOf<Set<Int>>().apply { repeat(n) { add(emptySet()) } }
-    val checked = mutableStateListOf<Boolean>().apply { repeat(n) { add(false) } }
+    /** Show was pressed on this question: right options green, a wrong pick red */
+    val shown = mutableStateListOf<Boolean>().apply { repeat(n) { add(false) } }
     val flagged = mutableStateListOf<Boolean>().apply { repeat(n) { add(false) } }
     val explain = mutableStateListOf<Boolean>().apply { repeat(n) { add(false) } }
     var inReview by mutableStateOf(false)
-    /** after the first review, results show everywhere even with "don't show correct answers" */
-    var reviewed by mutableStateOf(false)
-    var timeUp by mutableStateOf(false)
-    val endsAt = if (exam.timeLimit > 0) System.currentTimeMillis() + exam.timeLimit * 60_000L else 0L
-
-    val reveal get() = !hideResults || reviewed
 
     fun toggle(k: Int, j: Int) {
-        if (checked[k]) return
         val q = exam.questions[k]
         picks[k] = if (!q.multiple) setOf(j) else if (j in picks[k]) picks[k] - j else picks[k] + j
     }
 
-    fun check() {
-        if (picks[i].isNotEmpty()) checked[i] = true
-    }
-
     fun openReview() {
-        reviewed = true
         inReview = true
     }
 
-    // a chosen answer counts even if the check button was never pressed; that button only shows the result at once
+    // a chosen answer counts as given; Show only reveals the right one
     fun isRight(k: Int) = picks[k].isNotEmpty() && exam.questions[k].isRight(picks[k])
 }
 
@@ -159,14 +145,12 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var entries by mutableStateOf(library.scan())
     var alwaysExplain by mutableStateOf(prefs.getBoolean("alwaysExplain", false))
         private set
-    var hideResults by mutableStateOf(prefs.getBoolean("hideResults", false))
-        private set
     var session by mutableStateOf<Session?>(null)
     var message by mutableStateOf<String?>(null)
 
-    fun setOption(key: String, on: Boolean) {
-        if (key == "alwaysExplain") alwaysExplain = on else hideResults = on
-        prefs.edit().putBoolean(key, on).apply()
+    fun setAlwaysExplain(on: Boolean) {
+        alwaysExplain = on
+        prefs.edit().putBoolean("alwaysExplain", on).apply()
     }
 
     fun import(uri: Uri) {
@@ -175,7 +159,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun start(e: Entry) {
-        e.exam?.let { session = Session(it, alwaysExplain, hideResults) }
+        e.exam?.let { session = Session(it, alwaysExplain) }
     }
 }
 
@@ -285,40 +269,19 @@ fun ExamCard(e: Entry, onPlay: () -> Unit) {
 fun OptionsCard(m: AppModel) {
     Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(6.dp)).border(1.dp, LINE, RoundedCornerShape(6.dp)).padding(12.dp)) {
         Text("Options", fontWeight = FontWeight.Bold)
-        for ((key, label, on) in listOf(Triple("alwaysExplain", "Always explain", m.alwaysExplain), Triple("hideResults", "Don't show correct answers", m.hideResults))) {
-            Row(Modifier.fillMaxWidth().clickable { m.setOption(key, !on) }, verticalAlignment = Alignment.CenterVertically) {
-                Text(label, Modifier.weight(1f))
-                Switch(checked = on, onCheckedChange = { m.setOption(key, it) })
-            }
+        Row(Modifier.fillMaxWidth().clickable { m.setAlwaysExplain(!m.alwaysExplain) }, verticalAlignment = Alignment.CenterVertically) {
+            Text("Always explain (with Show)", Modifier.weight(1f))
+            Switch(checked = m.alwaysExplain, onCheckedChange = { m.setAlwaysExplain(it) })
         }
     }
 }
 
 // ---------- one question ----------
 
-private fun clock(ms: Long): String {
-    val s = ms.coerceAtLeast(0) / 1000
-    return "%02d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60)
-}
-
 @Composable
 fun QuestionScreen(m: AppModel, s: Session) {
     var quitting by remember { mutableStateOf(false) }
     BackHandler { quitting = true }
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    if (s.endsAt > 0) {
-        LaunchedEffect(s) {
-            while (true) {
-                now = System.currentTimeMillis()
-                if (now >= s.endsAt) {
-                    s.timeUp = true
-                    s.openReview()
-                    break
-                }
-                delay(1000)
-            }
-        }
-    }
     // one page per question plus a last one: swiping past the last question opens the review
     val pager = rememberPagerState(initialPage = s.i) { s.n + 1 }
     // swiping changes the question; picking one in the review moves the pager there
@@ -336,12 +299,18 @@ fun QuestionScreen(m: AppModel, s: Session) {
     Scaffold(
         topBar = {
             Column {
-                val sub = if (s.endsAt > 0) "Time Left: ${clock(s.endsAt - now)}" else "${s.n} questions"
-                DarkBar(s.exam.id, sub, onBack = { quitting = true }) {
-                    IconButton(onClick = { s.check() }) { Icon(Icons.Filled.DoneAll, "Check answer", tint = Color.White) }
+                DarkBar(s.exam.id, "${s.n} questions", onBack = { quitting = true }) {
                     IconButton(onClick = { s.openReview() }) { Icon(Icons.AutoMirrored.Outlined.Assignment, "Review", tint = Color.White) }
                 }
                 ItemStrip(s)
+            }
+        },
+        bottomBar = {
+            Row(Modifier.fillMaxWidth().background(DARK).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.End) {
+                val on = s.shown[s.i]
+                Button(onClick = { s.shown[s.i] = !on }, colors = ButtonDefaults.buttonColors(containerColor = YELLOW, contentColor = DARK)) {
+                    Text(if (on) "Hide" else "Show")
+                }
             }
         },
     ) { pad ->
@@ -381,7 +350,7 @@ fun ItemStrip(s: Session) {
         }
         Spacer(Modifier.weight(1f))
         IconButton(onClick = { s.explain[s.i] = !s.explain[s.i] }) { Icon(Icons.Outlined.Info, "Explain", tint = if (s.explain[s.i]) DARK else Color.Gray) }
-        IconButton(onClick = { if (!s.checked[s.i]) s.picks[s.i] = emptySet() }) { Icon(Icons.AutoMirrored.Filled.Undo, "Reset answer", tint = Color.Gray) }
+        IconButton(onClick = { s.picks[s.i] = emptySet() }) { Icon(Icons.AutoMirrored.Filled.Undo, "Reset answer", tint = Color.Gray) }
         IconButton(onClick = { s.flagged[s.i] = !s.flagged[s.i] }) {
             if (s.flagged[s.i]) Icon(Icons.Filled.Star, "Flagged", tint = Color(0xFFE6A100)) else Icon(Icons.Outlined.StarBorder, "Flag for review", tint = Color.Gray)
         }
@@ -390,8 +359,7 @@ fun ItemStrip(s: Session) {
 
 @Composable
 fun QuestionBody(q: Question, s: Session, k: Int) {
-    val reveal = s.reveal
-    val checked = s.checked[k]
+    val shown = s.shown[k]
     QuestionText(q.text)
     val bmp = remember(q.image) {
         q.image.substringAfter("base64,", "").takeIf { it.isNotEmpty() }?.let {
@@ -403,7 +371,6 @@ fun QuestionBody(q: Question, s: Session, k: Int) {
     Spacer(Modifier.height(8.dp))
     q.choices.forEachIndexed { j, c ->
         val picked = j in s.picks[k]
-        val shown = checked && reveal
         val (bg, label) = when {
             shown && picked && c.correct -> GREEN_BG to "CORRECT"
             shown && picked -> RED_BG to "INCORRECT"
@@ -412,7 +379,7 @@ fun QuestionBody(q: Question, s: Session, k: Int) {
             else -> Color.Transparent to ""
         }
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 3.dp).background(bg, RoundedCornerShape(6.dp)).clickable(enabled = !checked) { s.toggle(k, j) }.padding(vertical = 6.dp, horizontal = 4.dp),
+            Modifier.fillMaxWidth().padding(vertical = 3.dp).background(bg, RoundedCornerShape(6.dp)).clickable { s.toggle(k, j) }.padding(vertical = 6.dp, horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (q.multiple) Checkbox(picked, null) else RadioButton(picked, null)
@@ -420,8 +387,7 @@ fun QuestionBody(q: Question, s: Session, k: Int) {
             if (label.isNotEmpty()) Text(label, color = if (label == "CORRECT") GREEN else RED, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         }
     }
-    if (checked && !reveal) Text("Answer saved. Results are shown in the review.", color = Color.Gray, modifier = Modifier.padding(top = 10.dp))
-    if (s.explain[k] || (s.alwaysExplain && checked && reveal)) {
+    if (s.explain[k] || (s.alwaysExplain && shown)) {
         Column(Modifier.fillMaxWidth().padding(top = 14.dp).background(PAGE, RoundedCornerShape(6.dp)).border(1.dp, LINE, RoundedCornerShape(6.dp)).padding(12.dp)) {
             Text("Explanation", fontWeight = FontWeight.Bold)
             Text(q.explanation.ifBlank { "(no explanation)" })
@@ -481,7 +447,6 @@ fun ReviewScreen(m: AppModel, s: Session) {
             )
         }
         LazyColumn(Modifier.padding(pad).fillMaxSize().background(Color.White).then(swipeBack)) {
-            if (s.timeUp) item { Text("Time is up.", color = RED, fontWeight = FontWeight.Bold, modifier = Modifier.padding(12.dp)) }
             itemsIndexed(s.exam.questions) { k, q ->
                 val (color, label) = when {
                     s.picks[k].isEmpty() -> Color.Gray to "UNANSWERED"

@@ -11,7 +11,7 @@ class SessionTest {
 
     @Test
     fun answersCountWithoutPressingCheck() {
-        val s = Session(Exam(questions = listOf(q(false, true), q(true, false, true, multiple = true), q(true, false))), alwaysExplain = false, hideResults = false)
+        val s = Session(Exam(questions = listOf(q(false, true), q(true, false, true, multiple = true), q(true, false))), alwaysExplain = false)
         // pick the right answers and just swipe on, never pressing the check button
         s.toggle(0, 1)
         s.toggle(1, 0)
