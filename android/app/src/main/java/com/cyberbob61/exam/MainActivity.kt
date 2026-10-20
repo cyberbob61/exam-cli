@@ -315,9 +315,19 @@ fun QuestionScreen(m: AppModel, s: Session) {
             }
         }
     }
-    val pager = rememberPagerState(initialPage = s.i) { s.n }
+    // one page per question plus a last one: swiping past the last question opens the review
+    val pager = rememberPagerState(initialPage = s.i) { s.n + 1 }
     // swiping changes the question; picking one in the review moves the pager there
-    LaunchedEffect(pager) { snapshotFlow { pager.currentPage }.collect { s.i = it } }
+    LaunchedEffect(pager) {
+        snapshotFlow { pager.currentPage }.collect {
+            if (it == s.n) {
+                s.i = s.n - 1
+                s.openReview()
+            } else {
+                s.i = it
+            }
+        }
+    }
     LaunchedEffect(s.i) { if (pager.currentPage != s.i) pager.scrollToPage(s.i) }
     Scaffold(
         topBar = {
@@ -332,6 +342,10 @@ fun QuestionScreen(m: AppModel, s: Session) {
         },
     ) { pad ->
         HorizontalPager(pager, Modifier.padding(pad).fillMaxSize().background(Color.White)) { k ->
+            if (k == s.n) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Review", fontSize = 20.sp, color = Color.Gray) }
+                return@HorizontalPager
+            }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
                 QuestionBody(s.exam.questions[k], s, k)
             }

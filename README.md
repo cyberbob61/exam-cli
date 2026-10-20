@@ -25,7 +25,7 @@ They are built by `.github/workflows/build.yml` on every push to `dev`; a `v*` t
 
 `android/` holds the phone app (Kotlin + Jetpack Compose), styled after the VCE mobile player:
 a list of exam cards (title, file, size, ▶), and an exam screen with the time left, an
-"Item N of M" strip (ⓘ explain, ↶ reset, ★ flag), ✓ check answer and review; swipe left or right to move between questions.
+"Item N of M" strip (ⓘ explain, ↶ reset, ★ flag), ✓ check answer and review; swipe left or right to move between questions, past the last one to open the review.
 It reads the same `.json` exams; **Open file** brings in a `.json` or `.txt` (e.g. from Downloads),
 and a `.txt` gets a `.json` made next to it the same way as in exam-cli. The two options from the
 start screen are on the list screen too. Install the APK from the release (allow installing from
