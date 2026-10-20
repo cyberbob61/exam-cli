@@ -5,6 +5,20 @@ It reads the same exam `.json` files as the Exam designer GUI.
 
 ![Question](docs/screenshots/01-question.png)
 
+## Download
+
+Each release has ready builds (unpack and run `exam-cli`, it opens `samples/demo.json`):
+
+| File | For |
+|------|-----|
+| `exam-cli-<ver>-windows-x64.zip` | Windows 10/11 |
+| `exam-cli-<ver>-ubuntu-24.04-x64.tar.gz` | Ubuntu 24.04 |
+| `exam-cli-<ver>-centos-stream10-x64.tar.gz` | CentOS Stream 10 |
+| `exam-cli-<ver>-slackware-15.0-x64.tar.gz` | Slackware 15.0 (static, also runs on any x86_64 Linux) |
+| `exam-cli-<ver>-macos-15-universal.tar.gz` | macOS 15, Apple Silicon and Intel |
+
+They are built by `.github/workflows/build.yml` on every push to `dev`; a `v*` tag publishes them as a release.
+
 ## Run
 
 ```
@@ -13,7 +27,8 @@ exam-cli.exe [exam.json]
 
 - With a file: opens that exam (you can also drag a file onto `exam-cli.exe`).
 - Without a file: a start screen lists the exams in `samples\` and `questions\` next to the exe
-  (↑/↓ choose, Enter open, Q quit). If both folders are empty it asks for a file.
+  (↑/↓ choose, Enter open, Q quit). If both folders are empty it asks for a file
+  (Windows and macOS; on Linux it says where to put exams).
 - Options under the exam list (↑/↓ to them, Enter or Space to toggle):
   - `always explain`: the explanation opens by itself once you check an answer.
   - `don't show correct answers`: Enter only locks your answer; results (and the automatic

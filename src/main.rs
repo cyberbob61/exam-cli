@@ -342,7 +342,14 @@ fn open_picture(q: &Question, i: usize) {
     let ext = head.trim_start_matches("data:image/").trim_end_matches(';');
     let path = std::env::temp_dir().join(format!("exam-cli-q{}.{ext}", i + 1));
     if std::fs::write(&path, bytes).is_ok() {
-        let _ = std::process::Command::new("cmd").args(["/C", "start", ""]).arg(&path).spawn();
+        let mut open = if cfg!(windows) {
+            let mut c = std::process::Command::new("cmd");
+            c.args(["/C", "start", ""]);
+            c
+        } else {
+            std::process::Command::new(if cfg!(target_os = "macos") { "open" } else { "xdg-open" })
+        };
+        let _ = open.arg(&path).spawn();
     }
 }
 
@@ -387,7 +394,7 @@ fn scan(base: &Path) -> Vec<Entry> {
             v.sort();
             v
         };
-        let name = |p: &Path| format!("{dir}\\{}", p.file_name().unwrap_or_default().to_string_lossy());
+        let name = |p: &Path| format!("{dir}{}{}", std::path::MAIN_SEPARATOR, p.file_name().unwrap_or_default().to_string_lossy());
         let failed: Vec<Entry> = files("txt").into_iter().filter_map(|t| convert(&t).err().map(|e| Entry { name: name(&t), info: Err(format!("cannot convert: {e}")), path: t })).collect();
         rows.extend(files("json").into_iter().map(|j| Entry { name: name(&j), info: load(&j).map(|e| (e.title, e.questions.len())), path: j }));
         rows.extend(failed);
@@ -457,6 +464,18 @@ fn menu(rows: &[Entry]) -> io::Result<Option<(PathBuf, [bool; 2])>> {
             _ => {}
         }
     }
+}
+
+/// asks for an exam file; Linux machines often have no desktop, so there the user gets told where exams go
+#[cfg(any(windows, target_os = "macos"))]
+fn pick_file() -> Option<PathBuf> {
+    rfd::FileDialog::new().set_title("Open exam").add_filter("Exam", &["json", "txt"]).pick_file()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn pick_file() -> Option<PathBuf> {
+    eprintln!("No exams found. Put .json or .txt exams in samples/ or questions/ next to exam-cli, or run: exam-cli <exam.json>");
+    None
 }
 
 /// puts the terminal back even if the trainer panics
@@ -584,7 +603,7 @@ fn main() {
         None => {
             let rows = scan(&base);
             if rows.is_empty() {
-                let p = match rfd::FileDialog::new().set_title("Open exam").add_filter("Exam", &["json", "txt"]).pick_file() {
+                let p = match pick_file() {
                     Some(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) => convert(&p).unwrap_or_else(|e| fail(format!("cannot convert {}: {e}", p.display()))),
                     Some(p) => p,
                     None => return,
@@ -680,11 +699,12 @@ mod tests {
         fs::write(base.join("samples/s.json"), r#"{"title":"S","questions":[{"text":"q","choices":[{"text":"a","correct":true}]}]}"#).unwrap();
 
         let rows = scan(&base);
-        let got: Vec<(&str, Result<(String, usize), String>)> = rows.iter().map(|r| (r.name.as_str(), r.info.clone())).collect();
+        let s = std::path::MAIN_SEPARATOR;
+        let got: Vec<(String, Result<(String, usize), String>)> = rows.iter().map(|r| (r.name.clone(), r.info.clone())).collect();
         assert_eq!(got, [
-            ("samples\\s.json", Ok(("S".into(), 1))),
-            ("questions\\a.json", Ok(("Title A".into(), 1))),
-            ("questions\\bad.txt", Err("cannot convert: no questions found".into())),
+            (format!("samples{s}s.json"), Ok(("S".into(), 1))),
+            (format!("questions{s}a.json"), Ok(("Title A".into(), 1))),
+            (format!("questions{s}bad.txt"), Err("cannot convert: no questions found".into())),
         ]);
         assert!(base.join("questions/a.txt").is_file(), "the txt stays");
         assert!(!base.join("questions/bad.json").exists());

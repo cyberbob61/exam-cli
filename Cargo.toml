@@ -1,15 +1,18 @@
 [package]
 name = "exam-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Console exam trainer in the style of a Pearson VUE exam (training mode)"
 
 [dependencies]
 base64 = "0.22"
 crossterm = "0.28"
-rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# the file dialog is used only on Windows and macOS (see pick_file)
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+rfd = "0.15"
 
 [profile.release]
 strip = true
