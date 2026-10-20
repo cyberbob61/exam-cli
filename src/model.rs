@@ -121,6 +121,10 @@ fn join_lines(v: &[&str]) -> String {
 
 /// "12. rest" -> (12, "rest")
 fn q_start(line: &str) -> Option<(usize, &str)> {
+    // "Q12" alone on a line, the question text follows on the next lines (Anthropic_CCDV-F.txt style)
+    if let Some(num) = line.trim_end().strip_prefix('Q').filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) {
+        return Some((num.parse().ok()?, ""));
+    }
     let d = line.bytes().take_while(u8::is_ascii_digit).count();
     let rest = line.get(d..)?.strip_prefix('.')?;
     if d == 0 || !rest.starts_with(char::is_whitespace) {
@@ -197,7 +201,10 @@ pub fn parse_txt(src: &str) -> TxtExam {
             }
         }
         let Some(d) = q.as_mut() else {
-            head.push(line);
+            // "=====" rules under the header are decoration
+            if !(line.len() >= 3 && line.bytes().all(|b| b == b'=')) {
+                head.push(line);
+            }
             continue;
         };
         if st != St::Expl {
@@ -292,6 +299,29 @@ mod tests {
         assert!(e.questions[1].is_right(&[0, 2]));
         assert!(!e.questions[1].is_right(&[0]));
         assert_eq!(parse_txt(&to_txt(&e)), e);
+    }
+
+    #[test]
+    fn q_line_format() {
+        let src = "Anthropic CCDV-F\nTotal questions: 2\nDownloaded: 2026-09-15 23:05\n=====\n\n\
+            Q1\nFirst line.\n\nSecond paragraph?\n\nA. one\nB. two\n\nAnswer: B\n\n\
+            Q2\nPick two.\n\nA. a\nB. b\nC. c\n\nAnswer: A, C\n";
+        let e = parse_txt(src);
+        assert_eq!(e.title, "Anthropic CCDV-F");
+        assert!(!e.description.contains('='));
+        assert_eq!(e.questions.len(), 2);
+        assert_eq!(e.questions[0].text, "First line.\n\nSecond paragraph?");
+        assert_eq!((correct(&e.questions[0]), e.questions[0].kind), (vec![1], QType::Single));
+        assert_eq!((correct(&e.questions[1]), e.questions[1].kind), (vec![0, 2], QType::Multiple));
+    }
+
+    #[test]
+    fn ccdv_file() {
+        let Ok(b) = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/questions/Anthropic_CCDV-F.txt")) else { return };
+        let e = parse_txt(&decode_text(&b));
+        assert_eq!(e.questions.len(), 53);
+        assert!(e.questions.iter().all(|q| q.choices.len() == 4 && correct(q).len() == 1 && !q.text.is_empty()));
+        assert!(e.questions[52].text.starts_with("Your Claude application"));
     }
 
     #[test]

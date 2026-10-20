@@ -11,8 +11,34 @@ It reads the same exam `.json` files as the Exam designer GUI.
 exam-cli.exe [exam.json]
 ```
 
-- With a file: opens that exam (you can also drag a `.json` onto `exam-cli.exe`).
-- Without a file: opens `samples\demo.json` next to the exe, or asks for a file if it is missing.
+- With a file: opens that exam (you can also drag a file onto `exam-cli.exe`).
+- Without a file: a start screen lists the exams in `samples\` and `questions\` next to the exe
+  (↑/↓ choose, Enter open, Q quit). If both folders are empty it asks for a file.
+- Options under the exam list (↑/↓ to them, Enter or Space to toggle):
+  - `always explain`: the explanation opens by itself once you check an answer.
+  - `don't show correct answers`: Enter only locks your answer; results (and the automatic
+    explanation) appear in the review, at the end or with R.
+
+  The chosen options are shown in the header: `exam-cli · DEMO-01 · always explain`.
+
+Exams are `.json` files. A `.txt` file is converted on the way: when `name.txt` has no
+`name.json` next to it, exam-cli writes `name.json` beside it and keeps the `.txt`.
+An existing `.json` is never overwritten. A `.txt` that cannot be read shows up in red with the reason.
+
+Two text formats are understood:
+
+```
+Exam title                         Exam title
+=====                              
+                                   1. Question text
+Q1                                 A. option
+Question text                      B. option
+                                   Answer: B
+A. option                          
+B. option                          Explanation text
+                                   
+Answer: B          (A, C = multiple choice)
+```
 
 ## Keys
 
