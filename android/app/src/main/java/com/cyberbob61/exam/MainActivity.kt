@@ -46,13 +46,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
@@ -81,7 +78,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -104,7 +100,6 @@ private val GREEN = Color(0xFF2E7D32)
 private val GREEN_BG = Color(0xFFD7F0D2)
 private val RED = Color(0xFFC62828)
 private val RED_BG = Color(0xFFF8D4D4)
-private val PICKED_BG = Color(0xFFDDE7FF)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -123,7 +118,6 @@ class Session(val exam: Exam, val alwaysExplain: Boolean) {
     /** Show was pressed on this question: right options green, a wrong pick red */
     val shown = mutableStateListOf<Boolean>().apply { repeat(n) { add(false) } }
     val flagged = mutableStateListOf<Boolean>().apply { repeat(n) { add(false) } }
-    val explain = mutableStateListOf<Boolean>().apply { repeat(n) { add(false) } }
     var inReview by mutableStateOf(false)
 
     fun toggle(k: Int, j: Int) {
@@ -270,7 +264,7 @@ fun OptionsCard(m: AppModel) {
     Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(6.dp)).border(1.dp, LINE, RoundedCornerShape(6.dp)).padding(12.dp)) {
         Text("Options", fontWeight = FontWeight.Bold)
         Row(Modifier.fillMaxWidth().clickable { m.saveAlwaysExplain(!m.alwaysExplain) }, verticalAlignment = Alignment.CenterVertically) {
-            Text("Always explain (with Show)", Modifier.weight(1f))
+            Text("Always explain (with Check)", Modifier.weight(1f))
             Switch(checked = m.alwaysExplain, onCheckedChange = { m.saveAlwaysExplain(it) })
         }
     }
@@ -299,18 +293,12 @@ fun QuestionScreen(m: AppModel, s: Session) {
     Scaffold(
         topBar = {
             Column {
-                DarkBar(s.exam.id, "${s.n} questions", onBack = { quitting = true }) {
-                    IconButton(onClick = { s.openReview() }) { Icon(Icons.AutoMirrored.Outlined.Assignment, "Review", tint = Color.White) }
+                Column(Modifier.fillMaxWidth().background(DARK).statusBarsPadding().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(s.exam.id, color = Color.White, fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 12.dp))
+                    Spacer(Modifier.height(4.dp))
+                    ProgressLine(s.i, s.n)
                 }
-                ItemStrip(s)
-            }
-        },
-        bottomBar = {
-            Row(Modifier.fillMaxWidth().background(DARK).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.End) {
-                val on = s.shown[s.i]
-                Button(onClick = { s.shown[s.i] = !on }, colors = ButtonDefaults.buttonColors(containerColor = YELLOW, contentColor = DARK)) {
-                    Text(if (on) "Hide" else "Show")
-                }
+                CheckStrip(s)
             }
         },
     ) { pad ->
@@ -334,24 +322,32 @@ fun QuestionScreen(m: AppModel, s: Session) {
     }
 }
 
-/** the grey strip with the yellow "Item N of M" pill and the explain / reset / flag buttons */
+/** "Progress ████░░░░ 3/53", the same bar as exam-cli */
 @Composable
-fun ItemStrip(s: Session) {
-    Row(Modifier.fillMaxWidth().background(STRIP).padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(
-            Modifier.background(Brush.verticalGradient(listOf(Color(0xFFFFE27A), YELLOW)), RoundedCornerShape(20.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Outlined.Description, null, tint = DARK, modifier = Modifier.size(22.dp))
-            Column(Modifier.padding(start = 6.dp)) {
-                Text("Question ${s.i + 1}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text("Item ${s.i + 1} of ${s.n}", fontSize = 12.sp)
-            }
-        }
-        Spacer(Modifier.weight(1f))
-        IconButton(onClick = { s.explain[s.i] = !s.explain[s.i] }) { Icon(Icons.Outlined.Info, "Explain", tint = if (s.explain[s.i]) DARK else Color.Gray) }
-        IconButton(onClick = { s.picks[s.i] = emptySet() }) { Icon(Icons.AutoMirrored.Filled.Undo, "Reset answer", tint = Color.Gray) }
-        IconButton(onClick = { s.flagged[s.i] = !s.flagged[s.i] }) {
+fun ProgressLine(i: Int, n: Int) {
+    val cells = 24
+    val filled = (cells * (i + 1) + n / 2) / n
+    Text(
+        "Progress ${"█".repeat(filled)}${"░".repeat(cells - filled)} ${i + 1}/$n",
+        color = Color(0xFFDDDDDD),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 13.sp,
+        maxLines = 1,
+        modifier = Modifier.background(Color(0xFF2C2C2C)).padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+/** grey strip: Check in the middle shows the right answer (press again to hide it), the star flags the question */
+@Composable
+fun CheckStrip(s: Session) {
+    Box(Modifier.fillMaxWidth().background(STRIP).padding(vertical = 8.dp)) {
+        val on = s.shown[s.i]
+        Text(
+            if (on) "Hide" else "Check",
+            fontSize = 22.sp,
+            modifier = Modifier.align(Alignment.Center).background(Color.White).border(2.dp, Color.Black).clickable { s.shown[s.i] = !on }.padding(horizontal = 40.dp, vertical = 6.dp),
+        )
+        IconButton(onClick = { s.flagged[s.i] = !s.flagged[s.i] }, modifier = Modifier.align(Alignment.CenterEnd)) {
             if (s.flagged[s.i]) Icon(Icons.Filled.Star, "Flagged", tint = Color(0xFFE6A100)) else Icon(Icons.Outlined.StarBorder, "Flag for review", tint = Color.Gray)
         }
     }
@@ -375,7 +371,6 @@ fun QuestionBody(q: Question, s: Session, k: Int) {
             shown && picked && c.correct -> GREEN_BG to "CORRECT"
             shown && picked -> RED_BG to "INCORRECT"
             shown && c.correct -> GREEN_BG to ""
-            picked -> PICKED_BG to ""
             else -> Color.Transparent to ""
         }
         Row(
@@ -387,7 +382,7 @@ fun QuestionBody(q: Question, s: Session, k: Int) {
             if (label.isNotEmpty()) Text(label, color = if (label == "CORRECT") GREEN else RED, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         }
     }
-    if (s.explain[k] || (s.alwaysExplain && shown)) {
+    if (s.alwaysExplain && shown) {
         Column(Modifier.fillMaxWidth().padding(top = 14.dp).background(PAGE, RoundedCornerShape(6.dp)).border(1.dp, LINE, RoundedCornerShape(6.dp)).padding(12.dp)) {
             Text("Explanation", fontWeight = FontWeight.Bold)
             Text(q.explanation.ifBlank { "(no explanation)" })
