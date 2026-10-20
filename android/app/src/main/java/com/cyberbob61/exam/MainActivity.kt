@@ -38,6 +38,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -47,10 +49,6 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.FastForward
-import androidx.compose.material.icons.filled.FastRewind
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FolderOpen
@@ -74,19 +72,18 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -134,10 +131,10 @@ class Session(val exam: Exam, val alwaysExplain: Boolean, val hideResults: Boole
 
     val reveal get() = !hideResults || reviewed
 
-    fun toggle(j: Int) {
-        if (checked[i]) return
-        val q = exam.questions[i]
-        picks[i] = if (!q.multiple) setOf(j) else if (j in picks[i]) picks[i] - j else picks[i] + j
+    fun toggle(k: Int, j: Int) {
+        if (checked[k]) return
+        val q = exam.questions[k]
+        picks[k] = if (!q.multiple) setOf(j) else if (j in picks[k]) picks[k] - j else picks[k] + j
     }
 
     fun check() {
@@ -318,7 +315,10 @@ fun QuestionScreen(m: AppModel, s: Session) {
             }
         }
     }
-    val q = s.exam.questions[s.i]
+    val pager = rememberPagerState(initialPage = s.i) { s.n }
+    // swiping changes the question; picking one in the review moves the pager there
+    LaunchedEffect(pager) { snapshotFlow { pager.currentPage }.collect { s.i = it } }
+    LaunchedEffect(s.i) { if (pager.currentPage != s.i) pager.scrollToPage(s.i) }
     Scaffold(
         topBar = {
             Column {
@@ -330,11 +330,10 @@ fun QuestionScreen(m: AppModel, s: Session) {
                 ItemStrip(s)
             }
         },
-        bottomBar = { NavBar(s) },
     ) { pad ->
-        key(s.i) {
-            Column(Modifier.padding(pad).fillMaxSize().background(Color.White).verticalScroll(rememberScrollState()).padding(14.dp)) {
-                QuestionBody(q, s)
+        HorizontalPager(pager, Modifier.padding(pad).fillMaxSize().background(Color.White)) { k ->
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
+                QuestionBody(s.exam.questions[k], s, k)
             }
         }
     }
@@ -372,9 +371,9 @@ fun ItemStrip(s: Session) {
 }
 
 @Composable
-fun QuestionBody(q: Question, s: Session) {
+fun QuestionBody(q: Question, s: Session, k: Int) {
     val reveal = s.reveal
-    val checked = s.checked[s.i]
+    val checked = s.checked[k]
     QuestionText(q.text)
     val bmp = remember(q.image) {
         q.image.substringAfter("base64,", "").takeIf { it.isNotEmpty() }?.let {
@@ -385,7 +384,7 @@ fun QuestionBody(q: Question, s: Session) {
     if (q.multiple) Text("Choose ${q.choices.count { it.correct }}.", color = Color.Gray, modifier = Modifier.padding(top = 6.dp))
     Spacer(Modifier.height(8.dp))
     q.choices.forEachIndexed { j, c ->
-        val picked = j in s.picks[s.i]
+        val picked = j in s.picks[k]
         val shown = checked && reveal
         val (bg, label) = when {
             shown && picked && c.correct -> GREEN_BG to "CORRECT"
@@ -395,7 +394,7 @@ fun QuestionBody(q: Question, s: Session) {
             else -> Color.Transparent to ""
         }
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 3.dp).background(bg, RoundedCornerShape(6.dp)).clickable(enabled = !checked) { s.toggle(j) }.padding(vertical = 6.dp, horizontal = 4.dp),
+            Modifier.fillMaxWidth().padding(vertical = 3.dp).background(bg, RoundedCornerShape(6.dp)).clickable(enabled = !checked) { s.toggle(k, j) }.padding(vertical = 6.dp, horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (q.multiple) Checkbox(picked, null) else RadioButton(picked, null)
@@ -404,7 +403,7 @@ fun QuestionBody(q: Question, s: Session) {
         }
     }
     if (checked && !reveal) Text("Answer saved. Results are shown in the review.", color = Color.Gray, modifier = Modifier.padding(top = 10.dp))
-    if (s.explain[s.i] || (s.alwaysExplain && checked && reveal)) {
+    if (s.explain[k] || (s.alwaysExplain && checked && reveal)) {
         Column(Modifier.fillMaxWidth().padding(top = 14.dp).background(PAGE, RoundedCornerShape(6.dp)).border(1.dp, LINE, RoundedCornerShape(6.dp)).padding(12.dp)) {
             Text("Explanation", fontWeight = FontWeight.Bold)
             Text(q.explanation.ifBlank { "(no explanation)" })
@@ -429,22 +428,6 @@ fun QuestionText(text: String) {
                 fontSize = 14.sp,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).background(PAGE).border(1.dp, LINE).padding(10.dp).horizontalScroll(rememberScrollState()),
             )
-        }
-    }
-}
-
-@Composable
-fun NavBar(s: Session) {
-    Column(Modifier.background(Color.White).navigationBarsPadding()) {
-        HorizontalDivider(color = Color(0xFF29B6F6))
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), horizontalArrangement = Arrangement.End) {
-            val nav = @Composable { icon: ImageVector, what: String, to: Int ->
-                IconButton(onClick = { s.i = to }, enabled = to != s.i) { Icon(icon, what) }
-            }
-            nav(Icons.Filled.SkipPrevious, "First", 0)
-            nav(Icons.Filled.FastRewind, "Previous", (s.i - 1).coerceAtLeast(0))
-            nav(Icons.Filled.FastForward, "Next", (s.i + 1).coerceAtMost(s.n - 1))
-            nav(Icons.Filled.SkipNext, "Last", s.n - 1)
         }
     }
 }
