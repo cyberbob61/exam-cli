@@ -19,6 +19,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -81,6 +82,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -94,6 +96,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 private val DARK = Color(0xFF1E1E1E)
 private val YELLOW = Color(0xFFF5C518)
@@ -463,7 +466,21 @@ fun ReviewScreen(m: AppModel, s: Session) {
             }
         },
     ) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize().background(Color.White)) {
+        // a sideways swipe goes back to the last question, like paging back from the review
+        val swipeBack = Modifier.pointerInput(s) {
+            var dx = 0f
+            detectHorizontalDragGestures(
+                onDragStart = { dx = 0f },
+                onDragEnd = {
+                    if (abs(dx) > 100.dp.toPx()) {
+                        s.i = s.n - 1
+                        s.inReview = false
+                    }
+                },
+                onHorizontalDrag = { _, d -> dx += d },
+            )
+        }
+        LazyColumn(Modifier.padding(pad).fillMaxSize().background(Color.White).then(swipeBack)) {
             if (s.timeUp) item { Text("Time is up.", color = RED, fontWeight = FontWeight.Bold, modifier = Modifier.padding(12.dp)) }
             itemsIndexed(s.exam.questions) { k, q ->
                 val (color, label) = when {
