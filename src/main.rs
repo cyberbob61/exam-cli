@@ -32,7 +32,7 @@ const KEYS: [(&str, &str); 11] = [
     ("A–D, F", "choose option"),
     ("↑ / ↓", "move"),
     ("Space", "choose / toggle"),
-    ("Enter", "submit"),
+    ("Enter", "choose / check / next"),
     ("S", "show answer"),
     ("E", "explain"),
     ("I", "open picture"),
@@ -93,9 +93,14 @@ impl State {
     }
 
     /// first Enter submits; returns true when the answer was already checked, i.e. go to the next question
-    fn enter(&mut self) -> bool {
+    fn enter(&mut self, q: &Question) -> bool {
         if self.submitted {
             return true;
+        }
+        // multiple-choice: Enter on a row that is not chosen yet chooses it; on a chosen row it checks
+        if q.kind == QType::Multiple && self.picks.get(self.cursor) == Some(&false) {
+            self.picks[self.cursor] = true;
+            return false;
         }
         self.submitted = self.picks.contains(&true);
         false
@@ -563,7 +568,7 @@ fn run(exam: &Exam, opts: [bool; 2]) -> io::Result<()> {
                 _ => {}
             },
             KeyCode::Enter => {
-                if s.enter() {
+                if s.enter(q) {
                     if reviewed || i + 1 == n {
                         review = Some(i);
                     } else {
@@ -669,23 +674,32 @@ mod tests {
         }
         assert_eq!((s.cursor, s.picks.clone()), (3, vec![false, false, false, true]));
         s.pick(&one, 1); // a letter moves the cursor too
-        assert!(!s.enter()); // first Enter checks the answer
+        assert!(!s.enter(&one)); // first Enter checks the answer
         assert!(s.submitted && s.cursor == 1 && one.is_right(&[1]));
         s.arrow(&one, false); // locked after submit
         assert_eq!(s.cursor, 1);
-        assert!(s.enter()); // second Enter: next question
+        assert!(s.enter(&one)); // second Enter: next question
 
         let multi = q(QType::Multiple, &[true, true, false, false]);
         let mut m = State::new(&multi);
         assert!(!m.picks.contains(&true)); // nothing ticked by default
         m.arrow(&multi, false); // multiple: only the cursor moves
         assert_eq!((m.cursor, m.picks.contains(&true)), (1, false));
-        assert!(!m.enter() && !m.submitted); // nothing ticked: Enter neither checks nor moves on
-        m.pick(&multi, m.cursor); // Space
+        assert!(!m.enter(&multi) && !m.submitted); // Enter on an unchosen row chooses it
+        assert_eq!(m.picks, [false, true, false, false]);
         m.arrow(&multi, true);
-        m.pick(&multi, m.cursor);
-        m.enter();
-        assert_eq!((m.submitted, m.picks.clone()), (true, vec![true, true, false, false]));
+        assert!(!m.enter(&multi) && !m.submitted);
+        assert_eq!(m.picks, [true, true, false, false]);
+        m.pick(&multi, m.cursor); // Space takes a choice back
+        assert!(!m.enter(&multi) && !m.submitted && m.picks[0]);
+        assert!(!m.enter(&multi) && m.submitted); // Enter on a chosen row checks
+        assert_eq!(m.picks, [true, true, false, false]);
+        assert!(m.enter(&multi)); // and the next Enter goes on
+
+        // a question with no options does nothing and does not crash
+        let none = q(QType::Multiple, &[]);
+        let mut e = State::new(&none);
+        assert!(!e.enter(&none) && !e.submitted);
     }
 
     #[test]

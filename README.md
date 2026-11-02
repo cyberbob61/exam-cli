@@ -79,7 +79,7 @@ Keys act at once, there is no input prompt. They also work with a Russian keyboa
 | A–D, F | choose option (E is Explain, so option E is chosen with the arrows) |
 | ↑ / ↓ | single-choice: move the selection; multiple-choice: move the `›` cursor |
 | Space | choose / toggle the option under the cursor |
-| Enter | first press checks the answer, second press goes on |
+| Enter | single-choice: checks the answer, then goes on. Multiple-choice: chooses the row under the cursor; on a row already chosen it checks, then goes on |
 | S | show answer (correct rows turn green) |
 | E | explain |
 | I | open the question's picture in the default viewer |
