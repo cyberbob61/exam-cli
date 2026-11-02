@@ -19,7 +19,7 @@ Each release has ready builds (unpack and run `exam-cli`, it opens `samples/demo
 
 | `exam-<ver>-android.apk` | Android 8.0+ (phone app, see below) |
 
-They are built by `.github/workflows/build.yml` on every push to `dev`; a `v*` tag publishes them as a release.
+They are built by `.github/workflows/build.yml` on every push to `master`; a `v*` tag publishes them as a release.
 
 ## Android
 
