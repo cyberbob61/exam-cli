@@ -1,9 +1,9 @@
-# Builds and tests exam-cli on every push to dev; a v* tag also publishes a release with all builds.
+# Builds and tests exam-cli on every push to master; a v* tag also publishes a release with all builds.
 name: build
 
 on:
   push:
-    branches: [dev]
+    branches: [master]
     tags: ['v*']
   workflow_dispatch:
 
