@@ -29,7 +29,8 @@ exam-cli style progress bar on top, **Check** (marks the right answer green and 
 press again to hide) and ★ flag. Swipe left or right to move between questions, past the last
 one to open the review, and sideways in the review to go back.
 It reads the same `.json` exams; **Open file** brings in a `.json` or `.txt` (e.g. from Downloads),
-and a `.txt` gets a `.json` made next to it the same way as in exam-cli. The list screen has the
+and a `.txt` gets a `.json` made next to it the same way as in exam-cli. Long-press an exam card to delete it from the app
+(its `.json` and the `.txt` it came from; the file you opened stays where it was). The list screen has the
 "always explain" option (the explanation opens with Check). Install the APK from the release (allow installing from
 your browser or file manager when Android asks).
 

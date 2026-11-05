@@ -18,7 +18,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -152,6 +154,11 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         entries = library.scan()
     }
 
+    fun delete(e: Entry) {
+        library.delete(e)
+        entries = library.scan()
+    }
+
     fun start(e: Entry) {
         e.exam?.let { session = Session(it, alwaysExplain) }
     }
@@ -201,6 +208,7 @@ fun DarkBar(title: String, sub: String?, onBack: (() -> Unit)?, actions: @Compos
 
 @Composable
 fun ListScreen(m: AppModel) {
+    var toDelete by remember { mutableStateOf<Entry?>(null) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) m.import(uri) }
     Scaffold(
         topBar = {
@@ -217,20 +225,33 @@ fun ListScreen(m: AppModel) {
             contentPadding = PaddingValues(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(m.entries) { e -> ExamCard(e) { m.start(e) } }
+            items(m.entries) { e -> ExamCard(e, onPlay = { m.start(e) }, onDelete = { toDelete = e }) }
             item { OptionsCard(m) }
+            item { Text("Long-press an exam to delete it.", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp)) }
         }
+    }
+    toDelete?.let { e ->
+        Confirm(
+            "Delete Exam",
+            "Delete ${e.exam?.title ?: e.file.name}?\n\nIt is removed from the app; the file you opened it from (e.g. in Downloads) stays.",
+            onYes = {
+                m.delete(e)
+                toDelete = null
+            },
+            onNo = { toDelete = null },
+        )
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ExamCard(e: Entry, onPlay: () -> Unit) {
+fun ExamCard(e: Entry, onPlay: () -> Unit, onDelete: () -> Unit) {
     val ctx = LocalContext.current
     Row(
         Modifier.fillMaxWidth()
             .background(Color.White, RoundedCornerShape(6.dp))
             .border(1.dp, LINE, RoundedCornerShape(6.dp))
-            .clickable(enabled = e.exam != null, onClick = onPlay)
+            .combinedClickable(onClick = { if (e.exam != null) onPlay() }, onLongClick = onDelete)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
