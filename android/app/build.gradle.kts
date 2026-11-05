@@ -13,12 +13,27 @@ android {
         applicationId = "com.cyberbob61.exam"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        // CI run number, so each master build is newer than the last (the update check compares it)
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toInt() ?: 1
         versionName = "0.3.0"
+    }
+
+    // the permanent key (CI writes it from the repo secrets); without it Gradle uses its debug key
+    val keystore = System.getenv("ANDROID_KEYSTORE_FILE")
+    if (keystore != null) {
+        signingConfigs.create("exam") {
+            storeFile = file(keystore)
+            storeType = "pkcs12"
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias = "exam"
+            keyPassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        }
+        buildTypes["debug"].signingConfig = signingConfigs["exam"]
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -41,6 +56,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.core:core:1.13.1") // FileProvider for installing updates (already pulled in by activity)
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation("junit:junit:4.13.2")

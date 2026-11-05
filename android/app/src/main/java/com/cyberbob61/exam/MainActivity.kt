@@ -90,6 +90,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlin.math.abs
 
@@ -143,6 +147,24 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         private set
     var session by mutableStateOf<Session?>(null)
     var message by mutableStateOf<String?>(null)
+    /** a newer build on GitHub, asked about once per start */
+    var update by mutableStateOf<Update?>(null)
+    var downloading by mutableStateOf(false)
+        private set
+
+    init {
+        viewModelScope.launch { update = withContext(Dispatchers.IO) { checkUpdate() } }
+    }
+
+    fun installUpdate(u: Update) {
+        downloading = true
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { downloadApk(getApplication(), u.apk) } }
+                .fold({ installApk(getApplication(), it) }, { message = "Cannot download the update: ${it.message}" })
+            downloading = false
+            update = null
+        }
+    }
 
     fun saveAlwaysExplain(on: Boolean) {
         alwaysExplain = on
@@ -178,6 +200,14 @@ fun App(m: AppModel) {
                 onDismissRequest = { m.message = null },
                 confirmButton = { TextButton(onClick = { m.message = null }) { Text("OK") } },
                 text = { Text(msg) },
+            )
+        }
+        m.update?.let { u ->
+            Confirm(
+                "Update",
+                if (m.downloading) "Downloading build ${u.build}..." else "A newer version (build ${u.build}) is on GitHub. Download and install it?",
+                onYes = { if (!m.downloading) m.installUpdate(u) },
+                onNo = { m.update = null },
             )
         }
     }
@@ -227,7 +257,7 @@ fun ListScreen(m: AppModel) {
         ) {
             items(m.entries) { e -> ExamCard(e, onPlay = { m.start(e) }, onDelete = { toDelete = e }) }
             item { OptionsCard(m) }
-            item { Text("Long-press an exam to delete it.", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp)) }
+            item { Text("Long-press an exam to delete it.\nBuild ${BuildConfig.VERSION_CODE}",color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp)) }
         }
     }
     toDelete?.let { e ->

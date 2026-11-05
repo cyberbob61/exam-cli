@@ -34,6 +34,12 @@ and a `.txt` gets a `.json` made next to it the same way as in exam-cli. Long-pr
 "always explain" option (the explanation opens with Check). Install the APK from the release (allow installing from
 your browser or file manager when Android asks).
 
+Updates: every push to `master` replaces the `android-latest` pre-release with a new APK ("Android build N",
+N is the CI run number). On start the app compares N with its own build number (shown under the exam list) and, if
+GitHub has a newer one, offers to download and install it. All CI builds are signed with one permanent key
+(repo secrets `ANDROID_KEYSTORE`, base64 PKCS12 with alias `exam`, and `ANDROID_KEYSTORE_PASSWORD`), so an update
+installs over the installed app and keeps its exams. A local build without these secrets uses the Gradle debug key.
+
 ## Run
 
 ```
