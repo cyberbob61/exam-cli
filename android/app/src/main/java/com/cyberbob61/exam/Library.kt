@@ -5,6 +5,18 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.File
 
+/** marker left in the exam folder once the demo is deleted, so it is not copied back */
+internal const val DEMO_GONE = ".demo-deleted"
+
+/** removes an exam's .json and the .txt it was made from (or the next scan would rebuild the .json) */
+internal fun deleteExam(dir: File, file: File) {
+    val stem = file.nameWithoutExtension
+    dir.listFiles().orEmpty()
+        .filter { it.nameWithoutExtension == stem && it.extension.lowercase() in setOf("json", "txt") }
+        .forEach { it.delete() }
+    if (stem == "demo") File(dir, DEMO_GONE).createNewFile()
+}
+
 /** a list row: an exam file, or a .txt that could not be converted */
 class Entry(val file: File, val exam: Exam?, val error: String?)
 
@@ -15,7 +27,7 @@ class Library(private val context: Context) {
     /** converts each .txt without a .json next to it (the .txt stays, a .json is never overwritten), then lists the .json exams */
     fun scan(): List<Entry> {
         val demo = File(dir, "demo.json")
-        if (!demo.exists()) context.assets.open("demo.json").use { input -> demo.outputStream().use { input.copyTo(it) } }
+        if (!demo.exists() && !File(dir, DEMO_GONE).exists()) context.assets.open("demo.json").use { input -> demo.outputStream().use { input.copyTo(it) } }
         val files = { ext: String -> dir.listFiles().orEmpty().filter { it.extension.equals(ext, ignoreCase = true) }.sortedBy { it.name.lowercase() } }
         val failed = files("txt").mapNotNull { txt ->
             runCatching {
@@ -28,6 +40,8 @@ class Library(private val context: Context) {
         }
         return exams + failed
     }
+
+    fun delete(e: Entry) = deleteExam(dir, e.file)
 
     /** copies a picked .json or .txt into the library; returns an error message, or null when it worked */
     fun import(uri: Uri): String? = runCatching {
