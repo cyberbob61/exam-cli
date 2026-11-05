@@ -233,9 +233,7 @@ fun ListScreen(m: AppModel) {
     toDelete?.let { e ->
         Confirm(
             "Delete Exam",
-            "Delete ${e.exam?.title ?: e.file.name}?
-
-It is removed from the app; the file you opened it from (e.g. in Downloads) stays.",
+            "Delete ${e.exam?.title ?: e.file.name}?\n\nIt is removed from the app; the file you opened it from (e.g. in Downloads) stays.",
             onYes = {
                 m.delete(e)
                 toDelete = null
