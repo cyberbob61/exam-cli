@@ -6,7 +6,7 @@ mod model;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
     queue,
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{self, ClearType},
@@ -61,6 +61,16 @@ impl State {
             picks[0] = true;
         }
         State { picks, ..Default::default() }
+    }
+
+    /// "always show answers": S already pressed and the pointer on the first right option
+    /// (single-choice selects it, multiple-choice only moves the cursor there)
+    fn with_answer(q: &Question) -> Self {
+        let mut s = State { show: true, ..State::new(q) };
+        if let Some(j) = q.choices.iter().position(|c| c.correct) {
+            if q.kind == QType::Single { s.pick(q, j) } else { s.cursor = j }
+        }
+        s
     }
 
     /// choose option j (single) or flip it (multiple); the cursor follows
@@ -190,18 +200,27 @@ struct Screen<'a, W: Write> {
     y: u16,
     width: usize,
     height: u16,
+    /// rows scrolled off the top with the mouse wheel
+    top: u16,
 }
 
 impl<W: Write> Screen<'_, W> {
     /// one line; with a background it fills the whole row and puts `right` at the end
     fn line(&mut self, text: &str, fg: Color, bg: Option<Color>, right: &str) -> io::Result<()> {
-        // nothing below the window, or the console scrolls and the screen turns to mush; the last row is the footer's
-        if self.y + 1 >= self.height {
-            self.y += 1;
-            return Ok(());
-        }
+        // nothing above or below the window, or the console scrolls and the screen turns to mush; the last row is the footer's
+        let row = match self.y.checked_sub(self.top) {
+            Some(r) if r + 1 < self.height => r,
+            _ => {
+                self.y += 1;
+                return Ok(());
+            }
+        };
         let inner = self.width.saturating_sub(2 * MARGIN as usize);
-        queue!(self.out, cursor::MoveTo(MARGIN, self.y), SetForegroundColor(fg))?;
+        // a line longer than the window is cut, not wrapped: a wrapped line pushes every row below it down
+        let room = inner.saturating_sub(if bg.is_some() { right.chars().count() + 1 } else { 0 });
+        let text: String = text.chars().take(room).collect();
+        let text = text.as_str();
+        queue!(self.out, cursor::MoveTo(MARGIN, row), SetForegroundColor(fg))?;
         match bg {
             Some(bg) => {
                 let pad = inner.saturating_sub(text.chars().count() + right.chars().count() + 1);
@@ -216,7 +235,7 @@ impl<W: Write> Screen<'_, W> {
 
     /// the footer row: right after the content, but never below the window
     fn foot(&mut self) -> io::Result<()> {
-        queue!(self.out, cursor::MoveTo(MARGIN, self.y.min(self.height.saturating_sub(1))))
+        queue!(self.out, cursor::MoveTo(MARGIN, self.y.saturating_sub(self.top).min(self.height.saturating_sub(1))))
     }
 
     fn rule(&mut self) -> io::Result<()> {
@@ -226,7 +245,7 @@ impl<W: Write> Screen<'_, W> {
 }
 
 /// "exam-cli · CCIE-ENT · always explain": the exam and the options chosen on the start screen
-fn header(exam: &Exam, opts: [bool; 2]) -> String {
+fn header(exam: &Exam, opts: [bool; 3]) -> String {
     let mut h = format!("exam-cli · {}", exam_id(exam));
     for (name, _) in OPTIONS.iter().zip(opts).filter(|(_, on)| *on) {
         h += &format!(" · {name}");
@@ -238,14 +257,14 @@ fn exam_id(exam: &Exam) -> &str {
     if !exam.code.trim().is_empty() && exam.code != "000-000" { &exam.code } else { &exam.title }
 }
 
-// shortcut: lines past the bottom of the terminal are cut off; add scrolling if questions get that long
-/// reveal: show CORRECT / INCORRECT after Enter (off with "don't show correct answers" until review)
-fn render<W: Write>(out: &mut W, exam: &Exam, i: usize, s: &State, help: bool, opts: [bool; 2], reveal: bool, (width, height): (usize, u16)) -> io::Result<()> {
+/// reveal: show CORRECT / INCORRECT after Enter (off with "don't show correct answers" until review);
+/// top: rows scrolled away with the mouse wheel. Returns how many rows the whole page has.
+fn render<W: Write>(out: &mut W, exam: &Exam, i: usize, s: &State, help: bool, opts: [bool; 3], reveal: bool, top: u16, (width, height): (usize, u16)) -> io::Result<u16> {
     let q = &exam.questions[i];
     let n = exam.questions.len();
     let inner = width.saturating_sub(2 * MARGIN as usize);
     queue!(out, terminal::Clear(ClearType::All))?;
-    let mut sc = Screen { out, y: 1, width, height };
+    let mut sc = Screen { out, y: 1, width, height, top };
     sc.line(&header(exam, opts), TEAL, None, "")?;
     let kind = match q.kind {
         QType::Single => "single-choice".to_string(),
@@ -275,7 +294,8 @@ fn render<W: Write>(out: &mut W, exam: &Exam, i: usize, s: &State, help: bool, o
             sc.line(l, fg, bg, if k == 0 { right } else { "" })?;
         }
     }
-    if s.explain || (opts[ALWAYS_EXPLAIN] && s.submitted && reveal) {
+    // with "always explain" the explanation comes with the answer: once checked, or as soon as the answer is shown (S)
+    if s.explain || (opts[ALWAYS_EXPLAIN] && ((s.submitted && reveal) || s.show)) {
         sc.y += 1;
         sc.line("Explanation", BLUE, None, "")?;
         let text = if q.explanation.trim().is_empty() { "(no explanation)" } else { q.explanation.as_str() };
@@ -296,15 +316,17 @@ fn render<W: Write>(out: &mut W, exam: &Exam, i: usize, s: &State, help: bool, o
         sc.foot()?;
         queue!(sc.out, SetForegroundColor(TEXT), Print(format!("Progress {bar} {}/{n}   ", i + 1)), SetForegroundColor(DIM), Print("H help"), ResetColor)?;
     }
-    out.flush()
+    let rows = sc.y;
+    out.flush()?;
+    Ok(rows)
 }
 
 /// list of all questions with their result, shown after the last question
-fn render_review<W: Write>(out: &mut W, exam: &Exam, states: &[State], opts: [bool; 2], cur: usize, (width, height): (usize, u16)) -> io::Result<()> {
+fn render_review<W: Write>(out: &mut W, exam: &Exam, states: &[State], opts: [bool; 3], cur: usize, (width, height): (usize, u16)) -> io::Result<()> {
     let n = exam.questions.len();
     let inner = width.saturating_sub(2 * MARGIN as usize);
     queue!(out, terminal::Clear(ClearType::All))?;
-    let mut sc = Screen { out, y: 1, width, height };
+    let mut sc = Screen { out, y: 1, width, height, top: 0 };
     sc.line(&header(exam, opts), TEAL, None, "")?;
     sc.line("review", BLUE, None, "")?;
     sc.rule()?;
@@ -407,14 +429,15 @@ fn scan(base: &Path) -> Vec<Entry> {
     rows
 }
 
-/// start-screen options, indexes into `[bool; 2]`
+/// start-screen options, indexes into `[bool; 3]`
 const ALWAYS_EXPLAIN: usize = 0;
 const HIDE_RESULTS: usize = 1;
-const OPTIONS: [&str; 2] = ["always explain", "don't show correct answers"];
+const ALWAYS_SHOW: usize = 2;
+const OPTIONS: [&str; 3] = ["always explain", "don't show correct answers", "always show answers"];
 
-fn render_menu<W: Write>(out: &mut W, rows: &[Entry], opts: [bool; 2], cur: usize, (width, height): (usize, u16)) -> io::Result<()> {
+fn render_menu<W: Write>(out: &mut W, rows: &[Entry], opts: [bool; 3], cur: usize, (width, height): (usize, u16)) -> io::Result<()> {
     queue!(out, terminal::Clear(ClearType::All))?;
-    let mut sc = Screen { out, y: 1, width, height };
+    let mut sc = Screen { out, y: 1, width, height, top: 0 };
     sc.line("exam-cli", TEAL, None, "")?;
     sc.line("choose an exam", BLUE, None, "")?;
     sc.rule()?;
@@ -443,7 +466,7 @@ fn render_menu<W: Write>(out: &mut W, rows: &[Entry], opts: [bool; 2], cur: usiz
 }
 
 /// start screen; Some((path of the chosen exam, options)), None to quit
-fn menu(rows: &[Entry]) -> io::Result<Option<(PathBuf, [bool; 2])>> {
+fn menu(rows: &[Entry]) -> io::Result<Option<(PathBuf, [bool; 3])>> {
     let mut out = io::stdout();
     crossterm::execute!(out, terminal::EnterAlternateScreen, cursor::Hide)?;
     terminal::enable_raw_mode()?;
@@ -451,7 +474,7 @@ fn menu(rows: &[Entry]) -> io::Result<Option<(PathBuf, [bool; 2])>> {
     // exam rows first, then one row per option
     let n = rows.len() + OPTIONS.len();
     let mut cur = rows.iter().position(|r| r.info.is_ok()).unwrap_or(0);
-    let mut opts = [false; 2];
+    let mut opts = [false; 3];
     loop {
         let (w, h) = terminal::size()?;
         render_menu(&mut out, rows, opts, cur, (w as usize, h))?;
@@ -488,29 +511,35 @@ struct Raw;
 impl Drop for Raw {
     fn drop(&mut self) {
         let _ = terminal::disable_raw_mode();
-        let _ = crossterm::execute!(io::stdout(), cursor::Show, terminal::LeaveAlternateScreen);
+        let _ = crossterm::execute!(io::stdout(), event::DisableMouseCapture, cursor::Show, terminal::LeaveAlternateScreen);
     }
 }
 
-fn run(exam: &Exam, opts: [bool; 2]) -> io::Result<()> {
+fn run(exam: &Exam, opts: [bool; 3]) -> io::Result<()> {
     let n = exam.questions.len();
-    let mut states: Vec<State> = exam.questions.iter().map(State::new).collect();
+    let mut states: Vec<State> = exam.questions.iter().map(if opts[ALWAYS_SHOW] { State::with_answer } else { State::new }).collect();
     let (mut i, mut help) = (0, false);
     // Some(row) while the review list is open
     let mut review: Option<usize> = None;
     // once review has been open, Enter on an answered question goes back to it instead of to the next question
     let mut reviewed = false;
     let mut out = io::stdout();
-    crossterm::execute!(out, terminal::EnterAlternateScreen, cursor::Hide)?;
+    // the mouse wheel scrolls the page (a long explanation) instead of reaching the app as arrow keys
+    crossterm::execute!(out, terminal::EnterAlternateScreen, cursor::Hide, event::EnableMouseCapture)?;
     terminal::enable_raw_mode()?;
     let _raw = Raw;
     // Q asked "Quit?" and waits for Y / N
     let mut quitting = false;
+    // page scroll and the page height it was drawn with; a new question starts at the top
+    let (mut top, mut rows, mut top_of) = (0u16, 0u16, i);
     loop {
         let (width, height) = terminal::size()?;
+        if top_of != i {
+            (top, top_of) = (0, i);
+        }
         match review {
             Some(cur) => render_review(&mut out, exam, &states, opts, cur, (width as usize, height))?,
-            None => render(&mut out, exam, i, &states[i], help, opts, !opts[HIDE_RESULTS] || reviewed, (width as usize, height))?,
+            None => rows = render(&mut out, exam, i, &states[i], help, opts, !opts[HIDE_RESULTS] || reviewed, top, (width as usize, height))?,
         }
         if quitting {
             queue!(out, cursor::MoveTo(MARGIN, height.saturating_sub(2)), SetBackgroundColor(RED), SetForegroundColor(WHITE), Print(" Quit exam-cli?  Y yes   N no "), ResetColor)?;
@@ -518,6 +547,16 @@ fn run(exam: &Exam, opts: [bool; 2]) -> io::Result<()> {
         }
         let key = match event::read()? {
             Event::Key(k) if k.kind == KeyEventKind::Press => k,
+            Event::Mouse(m) => {
+                // the page shows height - 1 rows (the last row is the footer), so it scrolls until its end is in view
+                let most = rows.saturating_sub(height.saturating_sub(1));
+                match m.kind {
+                    MouseEventKind::ScrollDown => top = (top + 3).min(most),
+                    MouseEventKind::ScrollUp => top = top.saturating_sub(3),
+                    _ => {}
+                }
+                continue;
+            }
             _ => continue, // resize and key releases just redraw
         };
         // Ctrl+C asks like Q; a second Ctrl+C while asking quits
@@ -603,8 +642,8 @@ fn main() {
     let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)).unwrap_or_default();
     let base = if exe_dir.join("samples").is_dir() || exe_dir.join("questions").is_dir() { exe_dir } else { PathBuf::from(".") };
     let (path, opts) = match arg.map(PathBuf::from) {
-        Some(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) => (convert(&p).unwrap_or_else(|e| fail(format!("cannot convert {}: {e}", p.display()))), [false; 2]),
-        Some(p) => (p, [false; 2]),
+        Some(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) => (convert(&p).unwrap_or_else(|e| fail(format!("cannot convert {}: {e}", p.display()))), [false; 3]),
+        Some(p) => (p, [false; 3]),
         None => {
             let rows = scan(&base);
             if rows.is_empty() {
@@ -613,7 +652,7 @@ fn main() {
                     Some(p) => p,
                     None => return,
                 };
-                (p, [false; 2])
+                (p, [false; 3])
             } else {
                 match menu(&rows) {
                     Ok(Some(chosen)) => chosen,
@@ -703,6 +742,28 @@ mod tests {
     }
 
     #[test]
+    fn always_show_answers_points_at_the_answer() {
+        let s = State::with_answer(&q(QType::Single, &[false, false, true, false]));
+        assert!(s.show);
+        assert_eq!((s.cursor, s.picks.clone()), (2, vec![false, false, true, false]));
+        // multiple-choice: the cursor goes to the first right option, nothing is ticked yet
+        let m = State::with_answer(&q(QType::Multiple, &[false, true, false, true]));
+        assert_eq!((m.cursor, m.picks.clone()), (1, vec![false; 4]));
+    }
+
+    #[test]
+    fn long_lines_are_cut_not_wrapped() {
+        let mut buf = Vec::new();
+        let mut sc = Screen { out: &mut buf, y: 0, width: 20 + 2 * MARGIN as usize, height: 10, top: 0 };
+        sc.line(&"x".repeat(50), TEXT, None, "").unwrap();
+        sc.line(&"y".repeat(50), TEXT, Some(PURPLE), "").unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains(&"x".repeat(20)) && !s.contains(&"x".repeat(21)));
+        // a highlighted row keeps one space at the end, so the text gets one less
+        assert!(s.contains(&"y".repeat(19)) && !s.contains(&"y".repeat(20)));
+    }
+
+    #[test]
     fn scan_converts_txt_once() {
         let base = std::env::temp_dir().join(format!("exam-cli-scan-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
@@ -740,9 +801,9 @@ mod tests {
     fn start_screen_lists_options() {
         let rows = [Entry { name: "samples\\demo.json".into(), path: PathBuf::new(), info: Ok(("Demo".into(), 3)) }];
         let mut buf = vec![];
-        render_menu(&mut buf, &rows, [true, false], 2, (80, 40)).unwrap();
+        render_menu(&mut buf, &rows, [true, false, false], 2, (80, 40)).unwrap();
         let text = plain(buf);
-        for want in ["exam-cli", " samples\\demo.json   Demo · 3 questions", "Options", " [x] always explain", "›[ ] don't show correct answers"] {
+        for want in ["exam-cli", " samples\\demo.json   Demo · 3 questions", "Options", " [x] always explain", "›[ ] don't show correct answers", " [ ] always show answers"] {
             assert!(text.contains(want), "missing {want:?} in {text:?}");
         }
         assert!(!text.contains("TRAINING MODE"));
@@ -764,10 +825,39 @@ mod tests {
     }
 
     #[test]
+    fn always_explain_comes_with_shown_answers() {
+        let exam = Exam { questions: vec![q(QType::Single, &[false, true])], ..Default::default() };
+        let shown = |opts| {
+            let mut buf = vec![];
+            render(&mut buf, &exam, 0, &st(&[false, true], false, true), false, opts, true, 0, (80, 40)).unwrap();
+            plain(buf).contains("Explanation")
+        };
+        assert!(shown([true, false, true]));
+        assert!(!shown([false, false, true]));
+    }
+
+    #[test]
+    fn wheel_scroll_shows_the_end_of_a_long_explanation() {
+        let mut one = q(QType::Single, &[false, true]);
+        one.explanation = (1..=30).map(|k| format!("line{k}")).collect::<Vec<_>>().join("\n");
+        let exam = Exam { questions: vec![one], ..Default::default() };
+        let draw = |top| {
+            let mut buf = vec![];
+            let rows = render(&mut buf, &exam, 0, &st(&[false, true], false, true), false, [true, false, true], true, top, (80, 20)).unwrap();
+            (rows, plain(buf))
+        };
+        let (rows, first) = draw(0);
+        assert!(first.contains("exam-cli") && !first.contains("line30"));
+        // scrolled as far as the wheel goes: the explanation's last line is in view, the header is not
+        let (_, end) = draw(rows - 19);
+        assert!(end.contains("line30") && !end.contains("exam-cli"));
+    }
+
+    #[test]
     fn screen_matches_the_mockup() {
         let exam = Exam { code: "CCIE-ENT".into(), questions: vec![q(QType::Single, &[false, true, false, false]); 100], ..Default::default() };
         let mut buf = vec![];
-        render(&mut buf, &exam, 36, &st(&[true, false, false, false], true, false), false, [false; 2], true, (80, 40)).unwrap();
+        render(&mut buf, &exam, 36, &st(&[true, false, false, false], true, false), false, [false; 3], true, 0, (80, 40)).unwrap();
         let text = plain(buf);
         assert!(!text.contains("TRAINING MODE"));
         for want in ["exam-cli · CCIE-ENT", "single-choice", "Q37. Which?", " [A] x", "INCORRECT", "37/100", "H help"] {
@@ -782,7 +872,7 @@ mod tests {
         let exam = Exam { code: "DEMO".into(), questions: vec![one.clone(), one.clone(), one], ..Default::default() };
         let states = [st(&[false, true], true, false), st(&[true, false], true, false), st(&[true, false], false, false)];
         let mut buf = vec![];
-        render_review(&mut buf, &exam, &states, [true, true], 1, (80, 40)).unwrap();
+        render_review(&mut buf, &exam, &states, [true, true, false], 1, (80, 40)).unwrap();
         let text = plain(buf);
         for want in ["exam-cli · DEMO · always explain · don't show correct answers", "review", " Q1. Which?", "›Q2. Which?", "CORRECT", "INCORRECT", "UNANSWERED", "( 3 Questions , 2 Incorrect )"] {
             assert!(text.contains(want), "missing {want:?} in {text:?}");
@@ -796,7 +886,7 @@ mod tests {
         let states = vec![st(&[false, true], true, false); 6];
         let mut buf = vec![];
         // height 10 leaves room for 3 rows; the cursor on Q5 shows Q3..Q5
-        render_review(&mut buf, &exam, &states, [false; 2], 4, (80, 10)).unwrap();
+        render_review(&mut buf, &exam, &states, [false; 3], 4, (80, 10)).unwrap();
         let text = plain(buf);
         assert!(text.contains(" Q3.") && text.contains("›Q5.") && !text.contains("Q2.") && !text.contains("Q6."), "{text:?}");
         assert!(text.contains("( 6 Questions , 0 Incorrect )") && text.contains("rows 3–5 of 6"), "{text:?}");
