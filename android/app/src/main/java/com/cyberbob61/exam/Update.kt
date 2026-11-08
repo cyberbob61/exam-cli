@@ -7,6 +7,8 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
+import java.io.IOException
+import java.net.HttpURLConnection
 import java.net.URL
 
 /** CI replaces this pre-release with the newest master build on every push */
@@ -18,17 +20,23 @@ class Update(val build: Int, val apk: String)
 internal fun parseUpdate(release: String, current: Int): Update? {
     val o = json.parseToJsonElement(release).jsonObject
     val build = Regex("""build (\d+)""").find(o["name"]?.jsonPrimitive?.content.orEmpty())?.groupValues?.get(1)?.toInt() ?: return null
+    // the asset's API url, not browser_download_url: github.com/.../releases/download has answered 504 while the API worked
     val apk = o["assets"]?.jsonArray.orEmpty().map { it.jsonObject }
         .firstOrNull { it["name"]?.jsonPrimitive?.content.orEmpty().endsWith(".apk") }
-        ?.get("browser_download_url")?.jsonPrimitive?.content ?: return null
+        ?.get("url")?.jsonPrimitive?.content ?: return null
     return Update(build, apk).takeIf { build > current }
 }
 
 /** null when there is nothing newer, or no network: the check must never get in the way */
 fun checkUpdate(): Update? = runCatching { parseUpdate(URL(LATEST).readText(), BuildConfig.VERSION_CODE) }.getOrNull()
 
-fun downloadApk(context: Context, url: String): File =
-    File(context.cacheDir, "update.apk").apply { URL(url).openStream().use { i -> outputStream().use { i.copyTo(it) } } }
+/** the asset API answers with the file itself (a redirect to it) only when asked for octet-stream */
+fun downloadApk(context: Context, url: String): File {
+    val c = URL(url).openConnection() as HttpURLConnection
+    c.setRequestProperty("Accept", "application/octet-stream")
+    if (c.responseCode != 200) throw IOException("GitHub answered HTTP ${c.responseCode}, try again later")
+    return File(context.cacheDir, "update.apk").apply { c.inputStream.use { i -> outputStream().use { i.copyTo(it) } } }
+}
 
 /** hands the APK to the system installer (it asks once to allow installing from this app) */
 fun installApk(context: Context, apk: File) {
