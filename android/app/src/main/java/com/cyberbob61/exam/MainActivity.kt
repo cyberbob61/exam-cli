@@ -117,12 +117,12 @@ class MainActivity : ComponentActivity() {
 }
 
 /** one run through an exam; lives in the view model so turning the phone keeps it */
-class Session(val exam: Exam, val alwaysExplain: Boolean) {
+class Session(val exam: Exam, val alwaysExplain: Boolean, alwaysShow: Boolean = false) {
     val n = exam.questions.size
     var i by mutableIntStateOf(0)
     val picks = mutableStateListOf<Set<Int>>().apply { repeat(n) { add(emptySet()) } }
-    /** Show was pressed on this question: right options green, a wrong pick red */
-    val shown = mutableStateListOf<Boolean>().apply { repeat(n) { add(false) } }
+    /** Check was pressed on this question: right options green, a wrong pick red ("always show answers" presses it everywhere) */
+    val shown = mutableStateListOf<Boolean>().apply { repeat(n) { add(alwaysShow) } }
     val flagged = mutableStateListOf<Boolean>().apply { repeat(n) { add(false) } }
     var inReview by mutableStateOf(false)
 
@@ -144,6 +144,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("exam", Context.MODE_PRIVATE)
     var entries by mutableStateOf(library.scan())
     var alwaysExplain by mutableStateOf(prefs.getBoolean("alwaysExplain", false))
+        private set
+    var alwaysShow by mutableStateOf(prefs.getBoolean("alwaysShow", false))
         private set
     var session by mutableStateOf<Session?>(null)
     var message by mutableStateOf<String?>(null)
@@ -171,6 +173,11 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putBoolean("alwaysExplain", on).apply()
     }
 
+    fun saveAlwaysShow(on: Boolean) {
+        alwaysShow = on
+        prefs.edit().putBoolean("alwaysShow", on).apply()
+    }
+
     fun import(uri: Uri) {
         message = library.import(uri)
         entries = library.scan()
@@ -182,7 +189,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun start(e: Entry) {
-        e.exam?.let { session = Session(it, alwaysExplain) }
+        e.exam?.let { session = Session(it, alwaysExplain, alwaysShow) }
     }
 }
 
@@ -317,6 +324,10 @@ fun OptionsCard(m: AppModel) {
         Row(Modifier.fillMaxWidth().clickable { m.saveAlwaysExplain(!m.alwaysExplain) }, verticalAlignment = Alignment.CenterVertically) {
             Text("Always explain (with Check)", Modifier.weight(1f))
             Switch(checked = m.alwaysExplain, onCheckedChange = { m.saveAlwaysExplain(it) })
+        }
+        Row(Modifier.fillMaxWidth().clickable { m.saveAlwaysShow(!m.alwaysShow) }, verticalAlignment = Alignment.CenterVertically) {
+            Text("Always show answers", Modifier.weight(1f))
+            Switch(checked = m.alwaysShow, onCheckedChange = { m.saveAlwaysShow(it) })
         }
     }
 }

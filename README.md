@@ -31,7 +31,8 @@ one to open the review, and sideways in the review to go back.
 It reads the same `.json` exams; **Open file** brings in a `.json` or `.txt` (e.g. from Downloads),
 and a `.txt` gets a `.json` made next to it the same way as in exam-cli. Long-press an exam card to delete it from the app
 (its `.json` and the `.txt` it came from; the file you opened stays where it was). The list screen has the
-"always explain" option (the explanation opens with Check). Install the APK from the release (allow installing from
+"always explain" option (the explanation opens with Check) and the "always show answers" option (every question
+opens already checked: right answers green, and with "always explain" the explanation below them). Install the APK from the release (allow installing from
 your browser or file manager when Android asks).
 
 Updates: every push to `master` replaces the `android-latest` pre-release with a new APK ("Android build N",
@@ -54,6 +55,8 @@ exam-cli.exe [exam.json]
   - `always explain`: the explanation opens by itself once you check an answer.
   - `don't show correct answers`: Enter only locks your answer; results (and the automatic
     explanation) appear in the review, at the end or with R.
+  - `always show answers`: every question opens with the right options already green, as if S
+    was pressed (S still hides them), and the `›` pointer on the first right option.
 
   The chosen options are shown in the header: `exam-cli · DEMO-01 · always explain`.
 
@@ -93,6 +96,7 @@ Keys act at once, there is no input prompt. They also work with a Russian keyboa
 | N / P, ← / → | next / previous question |
 | R | review all questions |
 | H | toggle help |
+| Mouse wheel | scroll the page when it is taller than the window (e.g. a long explanation) |
 | Q, Esc | quit (asks Y / N); Ctrl+C asks too, a second Ctrl+C quits |
 
 Single-choice questions start with A selected.
