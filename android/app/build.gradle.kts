@@ -15,7 +15,7 @@ android {
         targetSdk = 35
         // CI run number, so each master build is newer than the last (the update check compares it)
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toInt() ?: 1
-        versionName = "0.4.0"
+        versionName = "0.4.1"
     }
 
     // the permanent key (CI writes it from the repo secrets); without it Gradle uses its debug key
