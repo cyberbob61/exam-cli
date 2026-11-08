@@ -48,9 +48,13 @@ exam-cli.exe [exam.json]
 ```
 
 - With a file: opens that exam (you can also drag a file onto `exam-cli.exe`).
-- Without a file: a start screen lists the exams in `samples\` and `questions\` next to the exe
-  (↑/↓ choose, Enter open, Q quit). If both folders are empty it asks for a file
-  (Windows and macOS; on Linux it says where to put exams).
+- Without a file: the start screen is a folder browser over `questions\` next to the exe (or
+  `samples\` when there is no `questions\`); it never goes above that folder. It shows the subfolders
+  (and `..` inside them) and the exams of the current folder (`.json`, and `.txt` that has no `.json`
+  yet) with their titles and question counts. ↑/↓ choose, Enter opens a folder or an exam,
+  Backspace goes up a folder, Q quits. With neither folder next to the exe it looks for them in the
+  current folder, and failing that browses the current folder itself, so the start menu and its
+  options are the same on Windows, Linux and macOS.
 - Options under the exam list (↑/↓ to them, Enter or Space to toggle):
   - `always explain`: the explanation opens by itself once you check an answer.
   - `don't show correct answers`: Enter only locks your answer; results (and the automatic
@@ -60,7 +64,7 @@ exam-cli.exe [exam.json]
 
   The chosen options are shown in the header: `exam-cli · DEMO-01 · always explain`.
 
-Exams are `.json` files. A `.txt` file is converted on the way: when `name.txt` has no
+Exams are `.json` files. A `.txt` file is converted when you open it: when `name.txt` has no
 `name.json` next to it, exam-cli writes `name.json` beside it and keeps the `.txt`.
 An existing `.json` is never overwritten. A `.txt` that cannot be read shows up in red with the reason.
 

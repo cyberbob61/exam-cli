@@ -405,27 +405,35 @@ fn convert(txt: &Path) -> Result<PathBuf, String> {
     Ok(json)
 }
 
-/// a start screen row: an exam file with (title, questions), or a .txt that could not be converted
+/// a start screen row: a folder to go into, or an exam file with (title, questions) or the reason it cannot be read
 struct Entry {
     name: String,
     path: PathBuf,
+    dir: bool,
     info: Result<(String, usize), String>,
 }
 
-/// converts new .txt files in samples\ and questions\, then lists the .json exams there
-fn scan(base: &Path) -> Vec<Entry> {
-    let mut rows = vec![];
-    for dir in ["samples", "questions"] {
-        let files = |ext: &str| -> Vec<PathBuf> {
-            let mut v: Vec<PathBuf> = fs::read_dir(base.join(dir)).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext))).collect();
-            v.sort();
-            v
-        };
-        let name = |p: &Path| format!("{dir}{}{}", std::path::MAIN_SEPARATOR, p.file_name().unwrap_or_default().to_string_lossy());
-        let failed: Vec<Entry> = files("txt").into_iter().filter_map(|t| convert(&t).err().map(|e| Entry { name: name(&t), info: Err(format!("cannot convert: {e}")), path: t })).collect();
-        rows.extend(files("json").into_iter().map(|j| Entry { name: name(&j), info: load(&j).map(|e| (e.title, e.questions.len())), path: j }));
-        rows.extend(failed);
-    }
+/// the folder above `dir`, unless `dir` is the browser's root (questions\): the browser never leaves it
+fn up(dir: &Path, root: &Path) -> Option<PathBuf> {
+    if dir == root { None } else { dir.parent().map(Path::to_path_buf) }
+}
+
+/// one folder of the start screen, like `ls`: `..` and the subfolders first, then the exams in it,
+/// .json and the .txt that has no .json yet (it is converted when opened, not while browsing)
+fn list(dir: &Path, root: &Path) -> Vec<Entry> {
+    let sep = std::path::MAIN_SEPARATOR;
+    let name = |p: &Path| p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let is = |p: &Path, ext: &str| p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext));
+    let folder = |name: String, path: &Path| Entry { name, path: path.to_path_buf(), dir: true, info: Ok(Default::default()) };
+    let mut items: Vec<PathBuf> = fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    items.sort_by_key(|p| name(p).to_lowercase());
+    let mut rows: Vec<Entry> = up(dir, root).map(|up| folder(format!("..{sep}"), &up)).into_iter().collect();
+    rows.extend(items.iter().filter(|p| p.is_dir() && !name(p).starts_with('.')).map(|p| folder(format!("{}{sep}", name(p)), p)));
+    rows.extend(
+        items.iter()
+            .filter(|p| p.is_file() && (is(p, "json") || is(p, "txt") && !p.with_extension("json").exists()))
+            .map(|p| Entry { name: name(p), path: p.clone(), dir: false, info: load(p).map(|e| (e.title, e.questions.len())) }),
+    );
     rows
 }
 
@@ -435,16 +443,19 @@ const HIDE_RESULTS: usize = 1;
 const ALWAYS_SHOW: usize = 2;
 const OPTIONS: [&str; 3] = ["always explain", "don't show correct answers", "always show answers"];
 
-fn render_menu<W: Write>(out: &mut W, rows: &[Entry], opts: [bool; 3], cur: usize, (width, height): (usize, u16)) -> io::Result<()> {
+fn render_menu<W: Write>(out: &mut W, dir: &Path, rows: &[Entry], opts: [bool; 3], cur: usize, (width, height): (usize, u16)) -> io::Result<()> {
     queue!(out, terminal::Clear(ClearType::All))?;
-    let mut sc = Screen { out, y: 1, width, height, top: 0 };
+    // a long folder scrolls so the › row stays in view: rows start at y 4, the options 3 rows after the last one
+    let cur_y = 4 + if cur < rows.len() { cur } else { cur + 2 } as u16;
+    let mut sc = Screen { out, y: 1, width, height, top: cur_y.saturating_sub(height.saturating_sub(2)) };
     sc.line("exam-cli", TEAL, None, "")?;
-    sc.line("choose an exam", BLUE, None, "")?;
+    sc.line(&format!("choose an exam: {}", dir.display()), BLUE, None, "")?;
     sc.rule()?;
-    let w = rows.iter().map(|r| r.name.chars().count()).max().unwrap_or(0);
+    let w = rows.iter().filter(|r| !r.dir).map(|r| r.name.chars().count()).max().unwrap_or(0);
     for (k, r) in rows.iter().enumerate() {
         let mark = if k == cur { '›' } else { ' ' };
         match &r.info {
+            _ if r.dir => sc.line(&format!("{mark}{}", r.name), if k == cur { WHITE } else { BLUE }, (k == cur).then_some(PURPLE), "")?,
             Ok((title, n)) => {
                 let text = format!("{mark}{:<w$}   {title} · {n} questions", r.name);
                 if k == cur { sc.line(&text, WHITE, Some(PURPLE), "")? } else { sc.line(&text, TEXT, None, "")? }
@@ -461,32 +472,61 @@ fn render_menu<W: Write>(out: &mut W, rows: &[Entry], opts: [bool; 3], cur: usiz
     }
     sc.rule()?;
     sc.foot()?;
-    queue!(sc.out, SetForegroundColor(DIM), Print("↑/↓ choose  Enter open / toggle  Q quit"), ResetColor)?;
+    queue!(sc.out, SetForegroundColor(DIM), Print("↑/↓ choose  Enter open / toggle  Backspace up  Q quit"), ResetColor)?;
     out.flush()
 }
 
-/// start screen; Some((path of the chosen exam, options)), None to quit
-fn menu(rows: &[Entry]) -> io::Result<Option<(PathBuf, [bool; 3])>> {
+/// start screen, a folder browser over `root` and its subfolders; Some((path of the chosen exam, options)), None to quit
+fn menu(root: PathBuf) -> io::Result<Option<(PathBuf, [bool; 3])>> {
     let mut out = io::stdout();
     crossterm::execute!(out, terminal::EnterAlternateScreen, cursor::Hide)?;
     terminal::enable_raw_mode()?;
     let _raw = Raw;
-    // exam rows first, then one row per option
-    let n = rows.len() + OPTIONS.len();
-    let mut cur = rows.iter().position(|r| r.info.is_ok()).unwrap_or(0);
+    let mut dir = root.clone();
+    let mut rows = list(&dir, &root);
+    // the first exam if the folder has one, else the first folder
+    let mut cur = rows.iter().position(|r| !r.dir && r.info.is_ok()).unwrap_or(0);
     let mut opts = [false; 3];
     loop {
+        // folder and exam rows first, then one row per option
+        let n = rows.len() + OPTIONS.len();
         let (w, h) = terminal::size()?;
-        render_menu(&mut out, rows, opts, cur, (w as usize, h))?;
+        // shown as questions\sub\deeper, from the root's own name down
+        let shown = root.parent().and_then(|p| dir.strip_prefix(p).ok()).unwrap_or(&dir);
+        render_menu(&mut out, shown, &rows, opts, cur, (w as usize, h))?;
         let key = match event::read()? {
             Event::Key(k) if k.kind == KeyEventKind::Press => k,
             _ => continue,
         };
+        // Enter on a folder goes into it; Backspace is cd .. (row 0 is .. whenever there is a parent)
+        let go = match key.code {
+            KeyCode::Enter if cur < rows.len() && rows[cur].dir => Some(rows[cur].path.clone()),
+            KeyCode::Backspace => up(&dir, &root),
+            _ => None,
+        };
+        if let Some(next) = go {
+            let from = std::mem::replace(&mut dir, next);
+            rows = list(&dir, &root);
+            // going up lands on the folder you came from; a new folder starts on its first exam or folder
+            cur = rows.iter().position(|r| r.path == from)
+                .or_else(|| rows.iter().position(|r| !r.dir && r.info.is_ok()))
+                .unwrap_or(usize::from(rows.len() > 1));
+            continue;
+        }
         match key.code {
             KeyCode::Up => cur = cur.saturating_sub(1),
             KeyCode::Down => cur = (cur + 1).min(n - 1),
             KeyCode::Enter | KeyCode::Char(' ') if cur >= rows.len() => opts[cur - rows.len()] ^= true,
-            KeyCode::Enter if rows[cur].info.is_ok() => return Ok(Some((rows[cur].path.clone(), opts))),
+            KeyCode::Enter if rows[cur].info.is_ok() => {
+                let path = &rows[cur].path;
+                if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) {
+                    return Ok(Some((path.clone(), opts)));
+                }
+                match convert(path) {
+                    Ok(json) => return Ok(Some((json, opts))),
+                    Err(e) => rows[cur].info = Err(format!("cannot convert: {e}")),
+                }
+            }
             KeyCode::Esc => return Ok(None),
             KeyCode::Char(c) if latin(c) == 'q' || (latin(c) == 'c' && key.modifiers.contains(KeyModifiers::CONTROL)) => return Ok(None),
             _ => {}
@@ -494,16 +534,15 @@ fn menu(rows: &[Entry]) -> io::Result<Option<(PathBuf, [bool; 3])>> {
     }
 }
 
-/// asks for an exam file; Linux machines often have no desktop, so there the user gets told where exams go
-#[cfg(any(windows, target_os = "macos"))]
-fn pick_file() -> Option<PathBuf> {
-    rfd::FileDialog::new().set_title("Open exam").add_filter("Exam", &["json", "txt"]).pick_file()
-}
-
-#[cfg(not(any(windows, target_os = "macos")))]
-fn pick_file() -> Option<PathBuf> {
-    eprintln!("No exams found. Put .json or .txt exams in samples/ or questions/ next to exam-cli, or run: exam-cli <exam.json>");
-    None
+/// where the start screen's folder browser starts and stops: questions\ (or samples\) next to the exe, then in the
+/// current folder (`cargo run`, or macOS running a downloaded binary from a moved-away copy), else the current folder
+/// itself, so the start menu with its options is always there
+fn browser_root() -> PathBuf {
+    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let found = exe_dir.iter().chain([&cwd]).flat_map(|base| ["questions", "samples"].map(|d| base.join(d))).find(|d| d.is_dir());
+    let root = found.unwrap_or(cwd);
+    std::path::absolute(&root).unwrap_or(root)
 }
 
 /// puts the terminal back even if the trainer panics
@@ -638,29 +677,14 @@ fn main() {
         }
         std::process::exit(1);
     };
-    // samples\ and questions\ live next to the exe; under `cargo run` they are in the current folder
-    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)).unwrap_or_default();
-    let base = if exe_dir.join("samples").is_dir() || exe_dir.join("questions").is_dir() { exe_dir } else { PathBuf::from(".") };
     let (path, opts) = match arg.map(PathBuf::from) {
         Some(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) => (convert(&p).unwrap_or_else(|e| fail(format!("cannot convert {}: {e}", p.display()))), [false; 3]),
         Some(p) => (p, [false; 3]),
-        None => {
-            let rows = scan(&base);
-            if rows.is_empty() {
-                let p = match pick_file() {
-                    Some(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("txt")) => convert(&p).unwrap_or_else(|e| fail(format!("cannot convert {}: {e}", p.display()))),
-                    Some(p) => p,
-                    None => return,
-                };
-                (p, [false; 3])
-            } else {
-                match menu(&rows) {
-                    Ok(Some(chosen)) => chosen,
-                    Ok(None) => return,
-                    Err(e) => fail(format!("exam-cli: {e}")),
-                }
-            }
-        }
+        None => match menu(browser_root()) {
+            Ok(Some(chosen)) => chosen,
+            Ok(None) => return,
+            Err(e) => fail(format!("exam-cli: {e}")),
+        },
     };
     let exam = load(&path).unwrap_or_else(|e| fail(format!("cannot open {}: {e}", path.display())));
     if let Err(e) = run(&exam, opts) {
@@ -764,29 +788,38 @@ mod tests {
     }
 
     #[test]
-    fn scan_converts_txt_once() {
-        let base = std::env::temp_dir().join(format!("exam-cli-scan-{}", std::process::id()));
+    fn folder_listing_and_txt_conversion() {
+        let base = std::env::temp_dir().join(format!("exam-cli-list-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
-        fs::create_dir_all(base.join("questions")).unwrap();
-        fs::create_dir_all(base.join("samples")).unwrap();
-        fs::write(base.join("questions/a.txt"), "Title A\n=====\n\nQ1\nWhy?\n\nA. x\nB. y\n\nAnswer: B\n").unwrap();
-        fs::write(base.join("questions/bad.txt"), "no questions here").unwrap();
-        fs::write(base.join("samples/s.json"), r#"{"title":"S","questions":[{"text":"q","choices":[{"text":"a","correct":true}]}]}"#).unwrap();
+        fs::create_dir_all(base.join("sub/deeper")).unwrap();
+        fs::create_dir_all(base.join(".git")).unwrap();
+        fs::write(base.join("a.txt"), "Title A\n=====\n\nQ1\nWhy?\n\nA. x\nB. y\n\nAnswer: B\n").unwrap();
+        fs::write(base.join("bad.txt"), "no questions here").unwrap();
+        fs::write(base.join("notes.md"), "not an exam").unwrap();
+        fs::write(base.join("s.json"), r#"{"title":"S","questions":[{"text":"q","choices":[{"text":"a","correct":true}]}]}"#).unwrap();
 
-        let rows = scan(&base);
         let s = std::path::MAIN_SEPARATOR;
-        let got: Vec<(String, Result<(String, usize), String>)> = rows.iter().map(|r| (r.name.clone(), r.info.clone())).collect();
-        assert_eq!(got, [
-            (format!("samples{s}s.json"), Ok(("S".into(), 1))),
-            (format!("questions{s}a.json"), Ok(("Title A".into(), 1))),
-            (format!("questions{s}bad.txt"), Err("cannot convert: no questions found".into())),
+        // base is the browser's root: no .. there, only in folders below it
+        let got = |dir: &Path| -> Vec<(String, bool, Result<(String, usize), String>)> { list(dir, &base).into_iter().map(|r| (r.name, r.dir, r.info)).collect() };
+        // folders first (hidden ones left out), then the exams; nothing is written while browsing
+        assert_eq!(got(&base), [
+            (format!("sub{s}"), true, Ok(Default::default())),
+            ("a.txt".into(), false, Ok(("Title A".into(), 1))),
+            ("bad.txt".into(), false, Err("no questions found".into())),
+            ("s.json".into(), false, Ok(("S".into(), 1))),
         ]);
-        assert!(base.join("questions/a.txt").is_file(), "the txt stays");
-        assert!(!base.join("questions/bad.json").exists());
+        assert!(!base.join("a.json").exists());
+        assert_eq!(got(&base.join("sub"))[..2].iter().map(|r| r.0.clone()).collect::<Vec<_>>(), [format!("..{s}"), format!("deeper{s}")]);
+        assert_eq!((up(&base, &base), up(&base.join("sub"), &base)), (None, Some(base.clone())));
 
+        // opening a.txt writes a.json beside it; from then on the folder lists the .json instead of the .txt
+        assert_eq!(convert(&base.join("a.txt")).unwrap(), base.join("a.json"));
+        assert!(base.join("a.txt").is_file(), "the txt stays");
+        assert_eq!(got(&base)[1].0, "a.json");
         // a json that is already there is never overwritten
-        fs::write(base.join("questions/a.json"), r#"{"title":"Edited","questions":[{"text":"q","choices":[{"text":"a","correct":true}]}]}"#).unwrap();
-        assert_eq!(scan(&base)[1].info, Ok(("Edited".into(), 1)));
+        fs::write(base.join("a.json"), r#"{"title":"Edited","questions":[{"text":"q","choices":[{"text":"a","correct":true}]}]}"#).unwrap();
+        convert(&base.join("a.txt")).unwrap();
+        assert_eq!(got(&base)[1].2, Ok(("Edited".into(), 1)));
         let _ = fs::remove_dir_all(&base);
     }
 
@@ -799,11 +832,14 @@ mod tests {
 
     #[test]
     fn start_screen_lists_options() {
-        let rows = [Entry { name: "samples\\demo.json".into(), path: PathBuf::new(), info: Ok(("Demo".into(), 3)) }];
+        let rows = [
+            Entry { name: "..\\".into(), path: PathBuf::new(), dir: true, info: Ok(Default::default()) },
+            Entry { name: "demo.json".into(), path: PathBuf::new(), dir: false, info: Ok(("Demo".into(), 3)) },
+        ];
         let mut buf = vec![];
-        render_menu(&mut buf, &rows, [true, false, false], 2, (80, 40)).unwrap();
+        render_menu(&mut buf, Path::new("C:\\exams\\samples"), &rows, [true, false, false], 3, (80, 40)).unwrap();
         let text = plain(buf);
-        for want in ["exam-cli", " samples\\demo.json   Demo · 3 questions", "Options", " [x] always explain", "›[ ] don't show correct answers", " [ ] always show answers"] {
+        for want in ["exam-cli", "choose an exam: C:\\exams\\samples", " ..\\", " demo.json   Demo · 3 questions", "Options", " [x] always explain", "›[ ] don't show correct answers", " [ ] always show answers", "Backspace up"] {
             assert!(text.contains(want), "missing {want:?} in {text:?}");
         }
         assert!(!text.contains("TRAINING MODE"));
