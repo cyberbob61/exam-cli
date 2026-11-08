@@ -190,8 +190,9 @@ pub fn parse_txt(src: &str) -> TxtExam {
     let mut st = St::Text;
     for line in src.split('\n') {
         if let Some((n, rest)) = q_start(line) {
-            // only the next expected number starts a question, so numbered lists inside text stay text
-            if (q.is_none() || st == St::Expl) && n == exam.questions.len() + if q.is_some() { 2 } else { 1 } {
+            // only the next expected number starts a question, so numbered lists inside text stay text;
+            // after the choices too, for a question that has no "Answer:" line
+            if (q.is_none() || st != St::Text) && n == exam.questions.len() + if q.is_some() { 2 } else { 1 } {
                 if let Some(d) = q.take() {
                     exam.questions.push(d.finish());
                 }
@@ -236,6 +237,8 @@ pub fn parse_txt(src: &str) -> TxtExam {
     if let Some(d) = q {
         exam.questions.push(d.finish());
     }
+    // a question without two options or without an answer (e.g. HOTSPOT) cannot be played
+    exam.questions.retain(|q| q.choices.len() >= 2 && q.choices.iter().any(|c| c.correct));
     let h = join_lines(&head);
     let mut it = h.split('\n');
     exam.title = it.next().unwrap_or("").trim().to_string();
@@ -313,6 +316,15 @@ mod tests {
         assert_eq!(e.questions[0].text, "First line.\n\nSecond paragraph?");
         assert_eq!((correct(&e.questions[0]), e.questions[0].kind), (vec![1], QType::Single));
         assert_eq!((correct(&e.questions[1]), e.questions[1].kind), (vec![0, 2], QType::Multiple));
+    }
+
+    #[test]
+    fn missing_answer_does_not_swallow_the_rest() {
+        let src = "T\n\nQ1\nNo answer line.\n\nA. x\nB. y\n\nQ2\nHOTSPOT - drag.\n\nAnswer: 1 -> 2\n\nQ3\nFine.\n\nA. x\nB. y\n\nAnswer: B\n";
+        let e = parse_txt(src);
+        // Q1 (no answer) and Q2 (no options) cannot be played; Q3 is still found
+        assert_eq!(e.questions.len(), 1);
+        assert_eq!((e.questions[0].text.as_str(), correct(&e.questions[0])), ("Fine.", vec![1]));
     }
 
     #[test]

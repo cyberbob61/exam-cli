@@ -23,4 +23,13 @@ class SessionTest {
         s.toggle(2, 1)
         assertFalse(s.isRight(2))
     }
+
+    @Test
+    fun alwaysShowAnswersStartsChecked() {
+        val exam = Exam(questions = listOf(q(false, true), q(true, false)))
+        assertTrue(Session(exam, alwaysExplain = true, alwaysShow = true).shown.all { it })
+        assertTrue(Session(exam, alwaysExplain = true).shown.none { it })
+        // shown answers are not given answers: nothing counts as right until it is picked
+        assertFalse(Session(exam, alwaysExplain = false, alwaysShow = true).isRight(0))
+    }
 }

@@ -110,8 +110,9 @@ fun parseTxt(source: String): TxtExam {
     var st = St.Text
     for (line in src.split('\n')) {
         val start = qStart(line)
-        // only the next expected number starts a question, so numbered lists inside text stay text
-        if (start != null && (d == null || st == St.Expl) && start.first == questions.size + (if (d != null) 2 else 1)) {
+        // only the next expected number starts a question, so numbered lists inside text stay text;
+        // after the choices too, for a question that has no "Answer:" line
+        if (start != null && (d == null || st != St.Text) &&start.first == questions.size + (if (d != null) 2 else 1)) {
             d?.let { questions += it.finish() }
             d = Draft(mutableListOf(start.second))
             st = St.Text
@@ -146,6 +147,8 @@ fun parseTxt(source: String): TxtExam {
         }
     }
     d?.let { questions += it.finish() }
+    // a question without two options or without an answer (e.g. HOTSPOT) cannot be played
+    questions.retainAll { q -> q.choices.size >= 2 && q.choices.any { it.correct } }
     val h = joinLines(head).split('\n')
     return TxtExam(h.first().trim(), joinLines(h.drop(1)), questions)
 }
