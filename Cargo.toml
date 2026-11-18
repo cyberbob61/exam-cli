@@ -1,6 +1,6 @@
 [package]
 name = "exam-cli"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 description = "Console exam trainer in the style of a Pearson VUE exam (training mode)"
 
