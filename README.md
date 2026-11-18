@@ -34,6 +34,12 @@ They are built by `.github/workflows/build.yml` on every push to `master`; a `v*
     was pressed (S still hides them), and the `›` pointer on the first right option.
 
   The chosen options are shown in the header: `exam · DEMO-01 · always explain`.
+- Skin, the row under the options (← / → or a click to change it; the page remembers it):
+  - `terminal`: the console look, one screen of text with a bar of keys at the bottom.
+  - `http_pro`: a practice-test page, the question as a card with Previous, Finish & score and Check answer,
+    and beside it the accuracy count and an answer sheet of every question (click one to jump to it).
+    A question opens with nothing chosen: the first Enter chooses the option under the pointer, the next one checks.
+    Changing the question keeps the page scrolled where it was.
 - A `.txt` exam is read on the fly; the page cannot write a `.json` beside it.
 - Every key below also has a button in the bottom bar, and options can be clicked.
 
