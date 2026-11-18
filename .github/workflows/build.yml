@@ -148,8 +148,12 @@ jobs:
     needs: [windows, ubuntu, centos, slackware, macos, android]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+      # the web version is one file that needs no build; its parser is checked against the txt rules first
+      - run: node web/check-parser.js
       - uses: actions/download-artifact@v4
         with: { path: dist, merge-multiple: true }
+      - run: cp web/exam.html dist/exam.html
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

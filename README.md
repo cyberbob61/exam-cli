@@ -16,10 +16,20 @@ Each release has ready builds (unpack and run `exam-cli`, it opens `samples/demo
 | `exam-cli-<ver>-centos-stream10-x64.tar.gz` | CentOS Stream 10 |
 | `exam-cli-<ver>-slackware-15.0-x64.tar.gz` | Slackware 15.0 (static, also runs on any x86_64 Linux) |
 | `exam-cli-<ver>-macos-15-universal.tar.gz` | macOS 15, Apple Silicon and Intel |
-
+| `exam.html` | any computer with a browser: nothing to install (see below) |
 | `exam-<ver>-android.apk` | Android 8.0+ (phone app, see below) |
 
 They are built by `.github/workflows/build.yml` on every push to `master`; a `v*` tag publishes them as a release.
+
+## Web page
+
+`web/exam.html` is the same trainer as one web page: open it from disk in Chrome, Edge, Firefox or Safari on
+Windows, Linux or macOS. It needs no install and no server and works offline. **Open folder** (or dropping a
+folder or exam files on the page) shows the folder like the exam-cli start screen, subfolders included, with the
+three options under it. The keys are those of exam-cli (← / → move between questions), and every key also has a
+button in the bottom bar; pictures show in the question. A `.txt` exam is read on the fly; the page cannot write
+a `.json` beside it. A browser cannot remember a folder, so it is opened again each time the page is opened.
+`node web/check-parser.js` checks that the page reads every `.txt` in `samples/` and `questions/` like exam-cli.
 
 ## Android
 

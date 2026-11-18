@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>exam</title>
+<!--
+  exam.html: the exam-cli trainer as one web page. Open it from disk in any browser (no install, no server, works
+  offline), open the questions folder, and practise with the same keys and screens as exam-cli.
+-->
+<style>
+  :root {
+    --bg: #0e0e10; --panel: #18181b; --teal: #4ec9b0; --blue: #7aaae8; --text: #d2d0c8; --white: #f5f5f5;
+    --dim: #828282; --purple: #3c3489; --green: #25500b; --red: #7a2020; --err: #eb6464; --gray: #303030; --rule: #3a3a3a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 15px/1.45 "Cascadia Mono", Consolas, "SF Mono", Menlo, "DejaVu Sans Mono", monospace; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 16px 96px; }
+  .h1 { color: var(--teal); }
+  .h2 { color: var(--blue); }
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 8px 0; }
+  .row { display: grid; grid-template-columns: auto 1fr auto; gap: 0 1ch; padding: 1px 6px; border-radius: 3px; cursor: pointer; white-space: pre-wrap; }
+  .row .label { font-weight: bold; }
+  .row.dir { color: var(--blue); }
+  .row.cur, .row.sel { background: var(--purple); color: var(--white); }
+  .row.correct, .row.answer { background: var(--green); color: var(--white); }
+  .row.incorrect { background: var(--red); color: var(--white); }
+  .row.unanswered { background: var(--gray); color: var(--white); }
+  .row.error { color: var(--err); cursor: default; }
+  .row.review.cur { outline: 2px solid var(--blue); }
+  .text { white-space: pre-wrap; color: var(--white); }
+  .expl { white-space: pre-wrap; }
+  pre.code { margin: 6px 0; padding: 8px 12px; background: var(--panel); border-left: 3px solid var(--rule); color: var(--text); white-space: pre; overflow-x: auto; font: inherit; }
+  .pic { display: block; max-width: 100%; max-height: 50vh; margin: 8px 0; cursor: zoom-in; background: #fff; }
+  .big { position: fixed; inset: 0; z-index: 5; max-width: none; max-height: none; width: 100vw; height: 100vh; object-fit: contain; margin: 0; background: rgba(0, 0, 0, .9); cursor: zoom-out; }
+  .gap { height: 1em; }
+  footer { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--rule); }
+  /* always one line: a long "103/129" or a narrow window scrolls the bar sideways instead of wrapping it */
+  footer div { max-width: 1100px; margin: 0 auto; padding: 8px 16px; display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; white-space: nowrap; overflow-x: auto; }
+  footer div > * { flex: none; }
+  footer div { scrollbar-width: none; }
+  /* a narrow window keeps just the keys on the buttons: ← Enter → S E R H Q */
+  @media (max-width: 960px) { footer .w { display: none; } }
+  .dim { color: var(--dim); }
+  button, label.btn { font: inherit; color: var(--text); background: var(--gray); border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+  button:hover, label.btn:hover { color: var(--white); border-color: var(--blue); }
+  button b, label.btn b { color: var(--teal); font-weight: normal; }
+  .ask { position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); z-index: 6; background: var(--red); color: var(--white); padding: 6px 14px; border-radius: 4px; }
+  .help { display: grid; grid-template-columns: 9ch 1fr; }
+  .drop { outline: 3px dashed var(--blue); outline-offset: -8px; }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<footer><div id="foot"></div></footer>
+<input type="file" id="pick-folder" webkitdirectory multiple>
+<input type="file" id="pick-files" multiple accept=".json,.txt">
+<script>
+/* logic:start (exam format and answer rules, the same as exam-cli; check-parser.js runs this part under node) */
+
+const letter = (i) => String.fromCharCode(65 + i);
+
+function joinLines(lines) {
+  let s = lines.join("\n");
+  while (s.includes("\n\n\n")) s = s.replaceAll("\n\n\n", "\n\n");
+  return s.trim();
+}
+
+/** "Q12" alone on a line, or "12. text" -> [12, text] */
+function qStart(line) {
+  const q = /^Q(\d+)$/.exec(line.trimEnd());
+  if (q) return [Number(q[1]), ""];
+  const m = /^(\d+)\.(\s[\s\S]*)$/.exec(line);
+  return m ? [Number(m[1]), m[2].trimStart()] : null;
+}
+
+/** "B. text" -> ["B", text] */
+function choiceStart(line) {
+  const m = /^([A-Z])\.(\s[\s\S]*)$/.exec(line);
+  return m ? [m[1], m[2].trimStart()] : null;
+}
+
+function finish(d) {
+  const q = { type: "single", text: joinLines(d.text), image: "", choices: d.choices, explanation: joinLines(d.expl), shuffle: true };
+  // single capital letters in "A, B and F"
+  for (const tok of d.answer.split(/[^\p{L}\p{N}]/u)) {
+    if (/^[A-Z]$/.test(tok)) {
+      const c = q.choices[tok.charCodeAt(0) - 65];
+      if (c) c.correct = true;
+    }
+  }
+  if (q.choices.filter((c) => c.correct).length > 1) q.type = "multiple";
+  return q;
+}
+
+/** a .txt exam: title and description, then "Q1" or "1. question", "A. option"..., "Answer: B", explanation */
+function parseTxt(source) {
+  const src = source.replace(/^﻿/, "").replaceAll("\r", "");
+  const questions = [], head = [];
+  let d = null, st = "text";
+  for (const line of src.split("\n")) {
+    const start = qStart(line);
+    // only the next expected number starts a question, so numbered lists inside text stay text;
+    // after the choices too, for a question that has no "Answer:" line
+    if (start && (d === null || st !== "text") && start[0] === questions.length + (d ? 2 : 1)) {
+      if (d) questions.push(finish(d));
+      d = { text: [start[1]], choices: [], answer: "", expl: [] };
+      st = "text";
+      continue;
+    }
+    if (d === null) {
+      // "=====" rules under the header are decoration
+      if (!(line.length >= 3 && /^=+$/.test(line))) head.push(line);
+      continue;
+    }
+    if (st !== "expl") {
+      if (line.slice(0, 7).toLowerCase() === "answer:") {
+        d.answer = line.slice(7).trim();
+        st = "expl";
+        continue;
+      }
+      const c = choiceStart(line);
+      if (c && d.choices.length < 26 && c[0] === letter(d.choices.length)) {
+        d.choices.push({ text: c[1], correct: false });
+        st = "choices";
+        continue;
+      }
+    }
+    if (st === "choices") { if (line.trim()) d.choices[d.choices.length - 1].text += "\n" + line; }
+    else if (st === "expl") d.expl.push(line);
+    else d.text.push(line);
+  }
+  if (d) questions.push(finish(d));
+  const h = joinLines(head).split("\n");
+  return {
+    title: h[0].trim(), description: joinLines(h.slice(1)),
+    // a question without two options or without an answer (e.g. HOTSPOT) cannot be played
+    questions: questions.filter((q) => q.choices.length >= 2 && q.choices.some((c) => c.correct)),
+  };
+}
+
+/** UTF-8 if valid, otherwise Windows-1252 (what older Windows editors save English text as) */
+function decodeText(bytes) {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch { return new TextDecoder("windows-1252").decode(bytes); }
+}
+
+/** our .json (older files with several exams[] are merged), or a .txt; throws with the reason it cannot be read */
+function readExam(name, bytes) {
+  const text = decodeText(bytes);
+  const raw = /\.txt$/i.test(name) ? parseTxt(text) : JSON.parse(text);
+  const all = (raw.questions || []).concat(...(raw.exams || []).map((e) => e.questions || []));
+  const exam = {
+    title: raw.title ?? "Untitled Exam", code: raw.code ?? "000-000",
+    questions: all.map((q) => ({
+      type: q.type === "multiple" ? "multiple" : "single", text: String(q.text ?? ""), image: String(q.image ?? ""),
+      choices: (q.choices || []).map((c) => ({ text: String(c.text ?? ""), correct: !!c.correct })),
+      explanation: String(q.explanation ?? ""),
+    })),
+  };
+  if (!exam.questions.length) throw new Error("no questions found");
+  return exam;
+}
+
+/** answer state of one question: single-choice starts with A chosen, multiple-choice with nothing ticked */
+function newState(q) {
+  return { picks: q.choices.map((_, j) => q.type === "single" && j === 0), submitted: false, show: false, explain: false, cursor: 0 };
+}
+
+/** "always show answers": S already pressed and the pointer on the first right option (single-choice selects it) */
+function withAnswer(q) {
+  const s = { ...newState(q), show: true };
+  const j = q.choices.findIndex((c) => c.correct);
+  if (j >= 0) { if (q.type === "single") pick(q, s, j); else s.cursor = j; }
+  return s;
+}
+
+/** choose option j (single) or flip it (multiple); the cursor follows */
+function pick(q, s, j) {
+  if (s.submitted || j >= s.picks.length) return;
+  s.cursor = j;
+  if (q.type === "single") s.picks = s.picks.map((_, k) => k === j);
+  else s.picks[j] = !s.picks[j];
+}
+
+/** single-choice: the selection itself moves; multiple: just the cursor */
+function arrow(q, s, up) {
+  const n = s.picks.length;
+  if (s.submitted || !n) return;
+  s.cursor = up ? Math.max(0, s.cursor - 1) : Math.min(n - 1, s.cursor + 1);
+  if (q.type === "single") pick(q, s, s.cursor);
+}
+
+const isRight = (q, s) => q.choices.every((c, j) => c.correct === s.picks[j]);
+
+/** first Enter submits; true when the answer was already checked, i.e. go on.
+ *  multiple-choice: Enter on a row that is not chosen yet chooses it; on a chosen row it checks */
+function enter(q, s) {
+  if (s.submitted) return true;
+  if (q.type === "multiple" && s.picks[s.cursor] === false) { s.picks[s.cursor] = true; return false; }
+  s.submitted = s.picks.includes(true);
+  return false;
+}
+
+/** how option j is drawn: plain, sel (chosen), correct, incorrect, answer (a right option you did not choose) */
+function rowKind(q, s, j, reveal) {
+  const checked = s.submitted && reveal, picked = s.picks[j], right = q.choices[j].correct;
+  if (checked) return picked ? (right ? "correct" : "incorrect") : (right ? "answer" : "plain");
+  if (right && s.show) return "answer";
+  return picked ? "sel" : "plain";
+}
+
+/* logic:end */
+
+if (typeof document !== "undefined") {
+const OPTIONS = ["always explain", "don't show correct answers", "always show answers"];
+const [EXPLAIN, HIDE, SHOW] = [0, 1, 2];
+const KEYS = [["A–D, F", "choose option"], ["↑ / ↓", "move"], ["Space", "choose / toggle"], ["Enter", "choose / check / next"],
+  ["S", "show answer"], ["E", "explain"], ["I", "enlarge picture"], ["← / →", "previous / next question (also P / N)"],
+  ["R", "review all questions"], ["H", "hide help"], ["Q, Esc", "quit to the exam list"]];
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+let opts = [false, false, false];
+try { opts = JSON.parse(localStorage.getItem("exam-opts")) || opts; } catch {}
+const saveOpts = () => { try { localStorage.setItem("exam-opts", JSON.stringify(opts)); } catch {} };
+
+// ---- the start screen: a folder browser over what was opened (a folder keeps its subfolders) ----
+let files = [];          // [{ path: "sub/a.json", file }], paths relative to the opened folder
+let rootName = "";
+let dir = "";            // "" is the root, else "sub/deeper/"
+let cur = 0;
+const info = new Map();  // path -> { exam } | { error } once read
+
+function setFiles(list) {
+  const paths = list.map((f) => f.path.replace(/\\/g, "/"));
+  // a picked folder comes as "questions/..."; browse inside it, like exam-cli does
+  const first = paths[0]?.split("/")[0];
+  const shared = paths.length && paths.every((p) => p.includes("/") && p.split("/")[0] === first);
+  rootName = shared ? first : "";
+  files = list.map((f, k) => ({ path: shared ? paths[k].slice(first.length + 1) : paths[k], file: f.file }))
+    .filter((f) => !f.path.split("/").some((part) => part.startsWith(".")));
+  dir = ""; cur = 0; info.clear();
+  renderMenu(true);
+}
+
+function listDir() {
+  const rows = [];
+  if (dir) rows.push({ dir: true, name: "../", path: dir.replace(/[^/]+\/$/, "") });
+  const sub = new Set(), here = [];
+  for (const f of files) {
+    if (!f.path.startsWith(dir)) continue;
+    const rest = f.path.slice(dir.length);
+    if (rest.includes("/")) sub.add(rest.split("/")[0]); else here.push(f);
+  }
+  [...sub].sort((a, b) => a.localeCompare(b)).forEach((s) => rows.push({ dir: true, name: s + "/", path: dir + s + "/" }));
+  const names = new Set(here.map((f) => f.path.toLowerCase()));
+  here.filter((f) => /\.json$/i.test(f.path) || (/\.txt$/i.test(f.path) && !names.has(f.path.toLowerCase().replace(/\.txt$/, ".json"))))
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .forEach((f) => rows.push({ dir: false, name: f.path.slice(dir.length), path: f.path, file: f.file }));
+  return rows;
+}
+
+async function readInfo(row) {
+  if (info.has(row.path)) return;
+  info.set(row.path, null);
+  try { info.set(row.path, { exam: readExam(row.name, new Uint8Array(await row.file.arrayBuffer())) }); }
+  catch (e) { info.set(row.path, { error: e.message }); }
+  if (screen === "menu") renderMenu();
+}
+
+function go(path) {
+  const from = dir;
+  dir = path;
+  const rows = listDir();
+  // going up lands on the folder you came from; a new folder starts on its first exam or folder
+  const back = rows.findIndex((r) => r.path === from);
+  cur = back >= 0 ? back : Math.max(0, rows.findIndex((r) => !r.dir));
+  if (cur === 0 && rows[0]?.name === "../" && rows.length > 1) cur = 1;
+  renderMenu(true);
+}
+
+function renderMenu(fresh) {
+  screen = "menu";
+  const rows = listDir();
+  if (fresh) {
+    const first = rows.findIndex((r) => !r.dir);
+    if (!dir && first >= 0) cur = first;
+  }
+  rows.filter((r) => !r.dir).forEach(readInfo);
+  const w = Math.max(0, ...rows.filter((r) => !r.dir).map((r) => r.name.length));
+  let h = `<div class="h1">exam</div><div class="h2">choose an exam: ${esc(rootName ? rootName + "/" + dir : dir || "")}</div><hr>`;
+  if (!files.length) {
+    h += `<div class="dim">Open the folder with your exams (for example <b>questions</b>), or drop it or exam files on this page.\n` +
+      `.json and .txt exams are read; a .txt is converted when it is opened.</div>`;
+  }
+  rows.forEach((r, k) => {
+    const mark = k === cur ? "›" : " ";
+    if (r.dir) { h += `<div class="row dir${k === cur ? " cur" : ""}" data-k="${k}"><span>${mark}${esc(r.name)}</span></div>`; return; }
+    const got = info.get(r.path);
+    if (got?.error) { h += `<div class="row error" data-k="${k}"><span>${mark}${esc(r.name.padEnd(w))}   ${esc(got.error)}</span></div>`; return; }
+    const what = got?.exam ? `${got.exam.title} · ${got.exam.questions.length} questions` : "…";
+    h += `<div class="row${k === cur ? " cur" : ""}" data-k="${k}"><span>${mark}${esc(r.name.padEnd(w))}   ${esc(what)}</span></div>`;
+  });
+  h += `<hr><div class="h2">Options</div>`;
+  OPTIONS.forEach((name, k) => {
+    const here = cur === rows.length + k;
+    h += `<div class="row${here ? " cur" : ""}" data-k="${rows.length + k}"><span>${here ? "›" : " "}[${opts[k] ? "x" : " "}] ${esc(name)}</span></div>`;
+  });
+  $("app").innerHTML = h + "<hr>";
+  $("foot").innerHTML = `<span class="dim">↑/↓ choose  Enter open / toggle  Backspace up</span>` +
+    `<label class="btn" for="pick-folder"><b>📁</b> Open folder</label><label class="btn" for="pick-files">Open file</label>`;
+  document.querySelector(".row.cur")?.scrollIntoView({ block: "nearest" });
+}
+
+function menuKey(code) {
+  const rows = listDir(), n = rows.length + OPTIONS.length;
+  if (code === "ArrowUp") cur = Math.max(0, cur - 1);
+  else if (code === "ArrowDown") cur = Math.min(n - 1, cur + 1);
+  else if (code === "Backspace") { if (dir) go(rows[0].path); return; }
+  else if (code === "Enter" || code === "Space") {
+    if (cur >= rows.length) { opts[cur - rows.length] = !opts[cur - rows.length]; saveOpts(); }
+    else if (code === "Enter" && rows[cur].dir) { go(rows[cur].path); return; }
+    else if (code === "Enter" && info.get(rows[cur].path)?.exam) { start(info.get(rows[cur].path).exam); return; }
+  } else return false;
+  renderMenu();
+  return true;
+}
+
+// ---- one run through an exam ----
+let screen = "menu";
+let exam, states, i, help, review, reviewed, quitting, bigPic;
+
+function start(e) {
+  exam = e;
+  states = e.questions.map(opts[SHOW] ? withAnswer : newState);
+  [i, help, review, reviewed, quitting, bigPic] = [0, false, null, false, false, false];
+  screen = "exam";
+  renderExam(true);
+}
+
+const examId = () => (exam.code.trim() && exam.code !== "000-000" ? exam.code : exam.title);
+const header = () => ["exam · " + examId(), ...OPTIONS.filter((_, k) => opts[k])].join(" · ");
+
+/** prose keeps its line breaks; parts between ``` lines are code */
+function fmt(text, cls) {
+  return text.split("```").map((part, k) => {
+    if (k % 2 === 0) return part.trim() ? `<div class="${cls}">${esc(part.replace(/^\n+|\n+$/g, ""))}</div>` : "";
+    const code = /^[A-Za-z0-9]*\n/.test(part) ? part.replace(/^[A-Za-z0-9]*\n/, "") : part;
+    return `<pre class="code">${esc(code.trimEnd())}</pre>`;
+  }).join("");
+}
+
+function renderExam(top) {
+  if (review !== null) return renderReview();
+  const q = exam.questions[i], s = states[i], n = exam.questions.length;
+  const reveal = !opts[HIDE] || reviewed;
+  const kind = q.type === "single" ? "single-choice" : `multiple-choice (choose ${q.choices.filter((c) => c.correct).length})`;
+  let h = `<div class="h1">${esc(header())}</div><div class="h2">${kind}</div><hr>`;
+  h += fmt(`Q${i + 1}. ${q.text}`, "text");
+  if (q.image.startsWith("data:image")) h += `<img class="pic${bigPic ? " big" : ""}" src="${esc(q.image)}" alt="picture" data-act="KeyI">`;
+  h += `<div class="gap"></div>`;
+  const labels = { correct: "CORRECT", incorrect: "INCORRECT" };
+  q.choices.forEach((c, j) => {
+    const k = rowKind(q, s, j, reveal);
+    const mark = s.cursor === j && !s.submitted ? "›" : " ";
+    h += `<div class="row ${k}" data-j="${j}"><span>${mark}[${letter(j)}]</span><span>${esc(c.text)}</span><span class="label">${labels[k] || ""}</span></div>`;
+  });
+  // with "always explain" the explanation comes with the answer: once checked, or as soon as the answer is shown (S)
+  if (s.explain || (opts[EXPLAIN] && ((s.submitted && reveal) || s.show))) {
+    h += `<div class="gap"></div><div class="h2">Explanation</div>` + fmt(q.explanation.trim() || "(no explanation)", "expl");
+  }
+  h += "<hr>";
+  if (help) h += `<div class="h2">Help</div><div class="help">${KEYS.map(([k, w]) => `<span>${esc(k)}</span><span>${esc(w)}</span>`).join("")}</div>`;
+  $("app").innerHTML = h;
+  const BAR = 14, filled = Math.floor((BAR * (i + 1) + Math.floor(n / 2)) / n);
+  $("foot").innerHTML = `<span>${"█".repeat(filled)}${"░".repeat(BAR - filled)} ${i + 1}/${n}</span>` +
+    `<button data-act="ArrowLeft" title="previous"><b>←</b><span class="w"> prev</span></button>` +
+    `<button data-act="Enter" title="${s.submitted ? "next" : "check"}"><b>Enter</b><span class="w"> ${s.submitted ? "next" : "check"}</span></button>` +
+    `<button data-act="ArrowRight" title="next"><span class="w">next </span><b>→</b></button>` +
+    `<button data-act="KeyS" title="show answer"><b>S</b><span class="w"> show</span></button>` +
+    `<button data-act="KeyE" title="explain"><b>E</b><span class="w"> explain</span></button>` +
+    `<button data-act="KeyR" title="review"><b>R</b><span class="w"> review</span></button>` +
+    `<button data-act="KeyH" title="help"><b>H</b><span class="w"> help</span></button>` +
+    `<button data-act="KeyQ" title="quit"><b>Q</b><span class="w"> quit</span></button>` +
+    (quitting ? `<span class="ask">Quit to the exam list?  Y yes   N no</span>` : "");
+  if (top) window.scrollTo(0, 0);
+}
+
+function renderReview() {
+  const n = exam.questions.length;
+  let wrong = 0;
+  let h = `<div class="h1">${esc(header())}</div><div class="h2">review</div><hr>`;
+  exam.questions.forEach((q, k) => {
+    const s = states[k];
+    const first = q.text.split("\n").find((l) => l.trim() && !l.startsWith("```")) || "";
+    const [cls, label] = !s.submitted ? ["unanswered", "UNANSWERED"] : isRight(q, s) ? ["correct", "CORRECT"] : ["incorrect", "INCORRECT"];
+    // as in VCE, an unanswered question counts as incorrect
+    if (label !== "CORRECT") wrong++;
+    h += `<div class="row review ${cls}${k === review ? " cur" : ""}" data-r="${k}"><span>${k === review ? "›" : " "}Q${k + 1}.</span>` +
+      `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(first)}</span><span class="label">${label}</span></div>`;
+  });
+  $("app").innerHTML = h + "<hr>";
+  $("foot").innerHTML = `<span>( ${n} Questions , ${wrong} Incorrect )</span><span class="dim">↑/↓ choose  Enter open  R/Esc back</span>` +
+    `<button data-act="KeyR"><b>R</b> back</button><button data-act="KeyQ"><b>Q</b> quit</button>` +
+    (quitting ? `<span class="ask">Quit to the exam list?  Y yes   N no</span>` : "");
+  document.querySelector(".row.review.cur")?.scrollIntoView({ block: "nearest" });
+}
+
+function examKey(code) {
+  const n = exam.questions.length;
+  if (quitting) {
+    if (code === "KeyY") { renderMenu(); return true; }
+    if (code === "KeyN" || code === "Escape") quitting = false; else return true;
+    renderExam();
+    return true;
+  }
+  if (review !== null) {
+    reviewed = true;
+    if (code === "ArrowUp") review = Math.max(0, review - 1);
+    else if (code === "ArrowDown") review = Math.min(n - 1, review + 1);
+    else if (code === "Enter") { [i, review] = [review, null]; renderExam(true); return true; }
+    else if (code === "Escape" || code === "KeyR") { review = null; renderExam(true); return true; }
+    else if (code === "KeyQ") quitting = true;
+    else return false;
+    renderReview();
+    return true;
+  }
+  const q = exam.questions[i], s = states[i], was = i;
+  const choose = { KeyA: 0, KeyB: 1, KeyC: 2, KeyD: 3, KeyF: 5 };
+  if (code in choose) pick(q, s, choose[code]);
+  else if (code === "KeyE") s.explain = !s.explain;
+  else if (code === "Space") pick(q, s, s.cursor);
+  else if (code === "KeyS") s.show = !s.show;
+  else if (code === "KeyI") bigPic = !bigPic && q.image.startsWith("data:image");
+  else if (code === "KeyN" || code === "ArrowRight" || code === "PageDown") i = Math.min(n - 1, i + 1);
+  else if (code === "KeyP" || code === "ArrowLeft" || code === "PageUp") i = Math.max(0, i - 1);
+  else if (code === "KeyH") help = !help;
+  else if (code === "KeyR") review = i;
+  else if (code === "KeyQ" || code === "Escape") { if (bigPic) bigPic = false; else quitting = true; }
+  else if (code === "Enter") { if (enter(q, s)) { if (reviewed || i + 1 === n) review = i; else i++; } }
+  else if (code === "ArrowUp") arrow(q, s, true);
+  else if (code === "ArrowDown") arrow(q, s, false);
+  else return false;
+  if (i !== was) bigPic = false;
+  renderExam(i !== was);
+  return true;
+}
+
+// ---- input: keys (by position, so a Russian layout works too), clicks, buttons, dropped files ----
+const handle = (code) => (screen === "menu" ? menuKey(code) : examKey(code));
+
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (handle(e.code)) e.preventDefault();
+});
+
+document.addEventListener("click", (e) => {
+  const act = e.target.closest("[data-act]");
+  if (act) { handle(act.dataset.act); return; }
+  const row = e.target.closest("[data-k],[data-j],[data-r]");
+  if (!row) return;
+  if (screen === "menu") { cur = Number(row.dataset.k); menuKey("Enter"); }
+  else if (row.dataset.r !== undefined) { review = Number(row.dataset.r); examKey("Enter"); }
+  else if (row.dataset.j !== undefined) { pick(exam.questions[i], states[i], Number(row.dataset.j)); renderExam(); }
+});
+
+$("pick-folder").addEventListener("change", (e) => setFiles([...e.target.files].map((f) => ({ path: f.webkitRelativePath || f.name, file: f }))));
+$("pick-files").addEventListener("change", (e) => setFiles([...e.target.files].map((f) => ({ path: f.name, file: f }))));
+
+/** every file under a dropped folder, with its path */
+async function walk(entry, out) {
+  if (entry.isFile) { out.push({ path: entry.fullPath.replace(/^\//, ""), file: await new Promise((ok, no) => entry.file(ok, no)) }); return; }
+  const reader = entry.createReader();
+  for (;;) {
+    const batch = await new Promise((ok, no) => reader.readEntries(ok, no));
+    if (!batch.length) break;
+    for (const child of batch) await walk(child, out);
+  }
+}
+document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drop"); });
+document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("drop"); });
+document.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  document.body.classList.remove("drop");
+  const out = [];
+  for (const entry of [...e.dataTransfer.items].map((it) => it.webkitGetAsEntry?.()).filter(Boolean)) await walk(entry, out);
+  if (out.length) setFiles(out);
+});
+
+renderMenu(true);
+}
+</script>
+</body>
+</html>
