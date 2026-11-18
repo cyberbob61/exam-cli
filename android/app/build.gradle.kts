@@ -45,7 +45,7 @@ android {
         jvmTarget = "17"
     }
 
-    // the demo exam comes from the shared samples folder of exam-cli
+    // the demo exam comes from the samples folder at the repo root
     sourceSets["main"].assets.srcDir("../../samples")
 }
 

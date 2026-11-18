@@ -1,4 +1,4 @@
-// Exam data, same JSON as exam-cli and the Exam designer (src/model.rs), plus the TXT formats they import.
+// Exam data, same JSON and TXT formats as the web page (web/exam.html) and the Exam designer.
 package com.cyberbob61.exam
 
 import kotlinx.serialization.Serializable

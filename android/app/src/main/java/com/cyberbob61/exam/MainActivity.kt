@@ -1,4 +1,4 @@
-// Exam for Android: VCE-player style list of exams and exam screens, same exam files as exam-cli.
+// Exam for Android: VCE-player style list of exams and exam screens, same exam files as the web page (web/exam.html).
 package com.cyberbob61.exam
 
 import android.app.Application
@@ -384,7 +384,7 @@ fun QuestionScreen(m: AppModel, s: Session) {
     }
 }
 
-/** "Progress ████░░░░ 3/53", the same bar as exam-cli */
+/** "Progress ████░░░░ 3/53", the same bar as the web page */
 @Composable
 fun ProgressLine(i: Int, n: Int) {
     val cells = 24

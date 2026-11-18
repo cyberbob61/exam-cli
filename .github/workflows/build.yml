@@ -1,4 +1,5 @@
-# Builds and tests exam-cli on every push to master; a v* tag also publishes a release with all builds.
+# Checks the web page and builds the Android app on every push to master; a v* tag also publishes a release
+# with exam.html and the APK.
 name: build
 
 on:
@@ -11,99 +12,18 @@ permissions:
   contents: write
 
 env:
-  # file names: exam-cli-v0.2.0-ubuntu-24.04-x64.tar.gz on a tag, exam-cli-dev-... otherwise
+  # file names: exam-v0.4.2-android.apk on a tag, exam-dev-android.apk otherwise
   VER: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
 
 jobs:
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: cargo test --release --locked
-      - run: cargo build --release --locked
-      - name: package
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force pkg/exam-cli/samples | Out-Null
-          Copy-Item target/release/exam-cli.exe, README.md pkg/exam-cli/
-          Copy-Item samples/demo.json pkg/exam-cli/samples/
-          Compress-Archive pkg/exam-cli "exam-cli-$env:VER-windows-x64.zip"
-      - uses: actions/upload-artifact@v4
-        with: { name: windows-x64, path: '*.zip' }
-
-  ubuntu:
+  # the web version is one file that needs no build; its exam reading and answer rules are checked under node
+  web:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: cargo test --release --locked
-      - run: cargo build --release --locked
-      - name: package
-        run: |
-          mkdir -p pkg/exam-cli/samples
-          cp target/release/exam-cli README.md pkg/exam-cli/ && cp samples/demo.json pkg/exam-cli/samples/
-          tar -C pkg -czf "exam-cli-$VER-ubuntu-24.04-x64.tar.gz" exam-cli
+      - run: node web/check-parser.js
       - uses: actions/upload-artifact@v4
-        with: { name: ubuntu-24.04-x64, path: '*.tar.gz' }
-
-  centos:
-    runs-on: ubuntu-24.04
-    container: quay.io/centos/centos:stream10
-    steps:
-      - name: toolchain
-        run: |
-          dnf install -y gcc tar gzip
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - uses: actions/checkout@v4
-      - run: cargo test --release --locked
-      - run: cargo build --release --locked
-      - name: package
-        run: |
-          mkdir -p pkg/exam-cli/samples
-          cp target/release/exam-cli README.md pkg/exam-cli/ && cp samples/demo.json pkg/exam-cli/samples/
-          tar -C pkg -czf "exam-cli-$VER-centos-stream10-x64.tar.gz" exam-cli
-      - uses: actions/upload-artifact@v4
-        with: { name: centos-stream10-x64, path: '*.tar.gz' }
-
-  # Slackware has no CI runner: a fully static musl build runs on it without any system libraries,
-  # and is checked inside a Slackware 15.0 container
-  slackware:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup target add x86_64-unknown-linux-musl
-      - run: cargo test --release --locked --target x86_64-unknown-linux-musl
-      - run: cargo build --release --locked --target x86_64-unknown-linux-musl
-      - name: runs on Slackware 15.0
-        run: |
-          docker run --rm -v "$PWD/target/x86_64-unknown-linux-musl/release:/w" aclemons/slackware:15.0 \
-            sh -c 'cat /etc/slackware-version; /w/exam-cli /nonexistent.json 2>&1 | tee /tmp/out; grep -q "cannot open /nonexistent.json" /tmp/out'
-      - name: package
-        run: |
-          mkdir -p pkg/exam-cli/samples
-          cp target/x86_64-unknown-linux-musl/release/exam-cli README.md pkg/exam-cli/ && cp samples/demo.json pkg/exam-cli/samples/
-          tar -C pkg -czf "exam-cli-$VER-slackware-15.0-x64.tar.gz" exam-cli
-      - uses: actions/upload-artifact@v4
-        with: { name: slackware-15.0-x64, path: '*.tar.gz' }
-
-  macos:
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-      - run: cargo test --release --locked
-      - run: |
-          cargo build --release --locked --target aarch64-apple-darwin
-          cargo build --release --locked --target x86_64-apple-darwin
-      - name: package (one universal binary for Apple Silicon and Intel)
-        run: |
-          mkdir -p pkg/exam-cli/samples
-          lipo -create -output pkg/exam-cli/exam-cli target/aarch64-apple-darwin/release/exam-cli target/x86_64-apple-darwin/release/exam-cli
-          lipo -info pkg/exam-cli/exam-cli
-          cp README.md pkg/exam-cli/ && cp samples/demo.json pkg/exam-cli/samples/
-          tar -C pkg -czf "exam-cli-$VER-macos-15-universal.tar.gz" exam-cli
-      - uses: actions/upload-artifact@v4
-        with: { name: macos-15-universal, path: '*.tar.gz' }
+        with: { name: web, path: web/exam.html }
 
   # Android app in android/ (Kotlin + Compose). Signed with the permanent key from the repo secrets, so a new
   # APK installs over the old one; the build number (versionCode) is the run number.
@@ -145,15 +65,11 @@ jobs:
 
   release:
     if: github.ref_type == 'tag'
-    needs: [windows, ubuntu, centos, slackware, macos, android]
+    needs: [web, android]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      # the web version is one file that needs no build; its parser is checked against the txt rules first
-      - run: node web/check-parser.js
       - uses: actions/download-artifact@v4
         with: { path: dist, merge-multiple: true }
-      - run: cp web/exam.html dist/exam.html
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

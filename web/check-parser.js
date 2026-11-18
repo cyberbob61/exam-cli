@@ -1,5 +1,5 @@
 // node web/check-parser.js [file.txt ...]: runs the exam logic of exam.html under node and checks that it reads .txt
-// exams exactly like exam-cli did (exam-cli writes name.json next to name.txt; that json is the reference).
+// exams exactly like the name.json beside them (made from the .txt by the former console version or the Android app).
 // Without arguments it checks every .txt that has a .json next to it in samples/ and questions/.
 const fs = require('fs');
 const path = require('path');
