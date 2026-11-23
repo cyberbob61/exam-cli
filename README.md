@@ -32,6 +32,8 @@ They are built by `.github/workflows/build.yml` on every push to `master`; a `v*
     explanation) appear in the review, at the end or with R.
   - `always show answers`: every question opens with the right options already green, as if S
     was pressed (S still hides them), and the `›` pointer on the first right option.
+  - `hide questions`: the question text and its picture are left out, only the options are shown
+    (to learn the answers by themselves).
 
   The chosen options are shown in the header: `exam · DEMO-01 · always explain`.
 - Skin, the row under the options (← / → or a click to change it; the page remembers it):

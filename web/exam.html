@@ -113,6 +113,12 @@
   [data-skin="http_pro"] .pro-actions button.primary.off { color: #36425c; }
   [data-skin="http_pro"] .pro-actions button:hover { border-color: #4b5466; }
   @media (max-width: 560px) { .pro-actions { gap: 8px; } .pro-actions .space { display: none; } [data-skin="http_pro"] .pro-actions button { flex: 1; padding: 0 6px; font-size: 14px; } }
+  @media (max-width: 560px) {
+    [data-skin="http_pro"] main { padding: 0 8px 32px; }
+    .pro-card { padding: 20px 14px 18px; }
+    .pro-opt { gap: 10px; padding: 11px 12px; }
+    .pro-cap { gap: 8px; }
+  }
   .pro-keys { margin-top: 14px; color: #8a93a3; font-size: 12px; }
   .pro-keys kbd { display: inline-block; min-width: 17px; padding: 1px 4px; border: 1px solid #272c34; border-radius: 4px;
     background: #0d121a; color: #e6e8ea; font: 600 10.5px/15px var(--mono); text-align: center; }
@@ -305,16 +311,18 @@ function rowKind(q, s, j, reveal) {
 /* logic:end */
 
 if (typeof document !== "undefined") {
-const OPTIONS = ["always explain", "don't show correct answers", "always show answers"];
-const [EXPLAIN, HIDE, SHOW] = [0, 1, 2];
+const OPTIONS = ["always explain", "don't show correct answers", "always show answers", "hide questions"];
+// NOQ: the question text and its picture are left out, only the options are shown
+const [EXPLAIN, HIDE, SHOW, NOQ] = [0, 1, 2, 3];
 const KEYS = [["A–D, F", "choose option (or 1–6)"], ["↑ / ↓", "move"], ["Space", "choose / toggle"], ["Enter", "choose / check / next"],
   ["S", "show answer"], ["E", "explain"], ["I", "enlarge picture"], ["← / →", "previous / next question (also P / N)"],
   ["R", "review all questions"], ["H", "hide help"], ["Q, Esc", "quit to the exam list"]];
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-let opts = [false, false, false];
-try { opts = JSON.parse(localStorage.getItem("exam-opts")) || opts; } catch {}
+let opts = OPTIONS.map(() => false);
+// options saved before a new one was added are shorter: the new one starts off
+try { const saved = JSON.parse(localStorage.getItem("exam-opts")); if (Array.isArray(saved)) opts = opts.map((_, k) => !!saved[k]); } catch {}
 const saveOpts = () => { try { localStorage.setItem("exam-opts", JSON.stringify(opts)); } catch {} };
 
 // skins: names of the :root[data-skin] blocks in the style; Enter on the skin row goes to the next one
@@ -481,8 +489,8 @@ function renderExamPro(top) {
   h += `<div class="pro-body"><section class="pro-card">`;
   h += `<div class="pro-cap"><span>QUESTION ${i + 1} OF ${n}</span><span>${kind}</span></div>`;
   h += `<div class="pro-bar"><i style="width:${((i + 1) / n) * 100}%"></i></div>`;
-  h += fmt(q.text, "pro-q");
-  if (q.image.startsWith("data:image")) h += `<img class="pic${bigPic ? " big" : ""}" src="${esc(q.image)}" alt="picture" data-act="KeyI">`;
+  if (!opts[NOQ]) h += fmt(q.text, "pro-q");
+  if (!opts[NOQ] && q.image.startsWith("data:image")) h += `<img class="pic${bigPic ? " big" : ""}" src="${esc(q.image)}" alt="picture" data-act="KeyI">`;
   const labels = { correct: "CORRECT", incorrect: "INCORRECT" };
   q.choices.forEach((c, j) => {
     const k = rowKind(q, s, j, reveal);
@@ -539,8 +547,8 @@ function renderExam(top) {
   const reveal = !opts[HIDE] || reviewed;
   const kind = q.type === "single" ? "single-choice" : `multiple-choice (choose ${q.choices.filter((c) => c.correct).length})`;
   let h = `<div class="h1">${esc(header())}</div><div class="h2">${kind}</div><hr>`;
-  h += fmt(`Q${i + 1}. ${q.text}`, "text");
-  if (q.image.startsWith("data:image")) h += `<img class="pic${bigPic ? " big" : ""}" src="${esc(q.image)}" alt="picture" data-act="KeyI">`;
+  h += fmt(opts[NOQ] ? `Q${i + 1}.` : `Q${i + 1}. ${q.text}`, "text");
+  if (!opts[NOQ] && q.image.startsWith("data:image")) h += `<img class="pic${bigPic ? " big" : ""}" src="${esc(q.image)}" alt="picture" data-act="KeyI">`;
   h += `<div class="gap"></div>`;
   const labels = { correct: "CORRECT", incorrect: "INCORRECT" };
   q.choices.forEach((c, j) => {
@@ -614,7 +622,7 @@ function examKey(code) {
   else if (code === "KeyE") s.explain = !s.explain;
   else if (code === "Space") pick(q, s, s.cursor);
   else if (code === "KeyS") s.show = !s.show;
-  else if (code === "KeyI") bigPic = !bigPic && q.image.startsWith("data:image");
+  else if (code === "KeyI") bigPic = !bigPic && !opts[NOQ] && q.image.startsWith("data:image");
   else if (code === "KeyN" || code === "ArrowRight" || code === "PageDown") i = Math.min(n - 1, i + 1);
   else if (code === "KeyP" || code === "ArrowLeft" || code === "PageUp") i = Math.max(0, i - 1);
   else if (code === "KeyH") help = !help;
