@@ -34,6 +34,10 @@ They are built by `.github/workflows/build.yml` on every push to `master`; a `v*
     was pressed (S still hides them), and the `›` pointer on the first right option.
   - `hide questions`: the question text and its picture are left out, only the options are shown
     (to learn the answers by themselves).
+  - `random questions`: the questions come in a new order every time the exam starts; the question's
+    number in the file is shown beside it (`file Q12`, or `SOURCE Q12` in http_pro).
+  - `random answers`: each question's options are shuffled every time the exam starts, except in
+    questions saved with `"shuffle": false`. An explanation that names a letter still means the file's order.
 
   The chosen options are shown in the header: `exam · DEMO-01 · always explain`.
 - Skin, the row under the options (← / → or a click to change it; the page remembers it):

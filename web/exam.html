@@ -252,6 +252,8 @@ function readExam(name, bytes) {
       type: q.type === "multiple" ? "multiple" : "single", text: String(q.text ?? ""), image: String(q.image ?? ""),
       choices: (q.choices || []).map((c) => ({ text: String(c.text ?? ""), correct: !!c.correct })),
       explanation: String(q.explanation ?? ""),
+      // false keeps the options in file order ("All of the above" and the like)
+      shuffle: q.shuffle !== false,
     })),
   };
   if (!exam.questions.length) throw new Error("no questions found");
@@ -311,9 +313,17 @@ function rowKind(q, s, j, reveal) {
 /* logic:end */
 
 if (typeof document !== "undefined") {
-const OPTIONS = ["always explain", "don't show correct answers", "always show answers", "hide questions"];
-// NOQ: the question text and its picture are left out, only the options are shown
-const [EXPLAIN, HIDE, SHOW, NOQ] = [0, 1, 2, 3];
+const OPTIONS = ["always explain", "don't show correct answers", "always show answers", "hide questions", "random questions", "random answers"];
+// NOQ: the question text and its picture are left out, only the options are shown;
+// RANDQ / RANDA: a new order of the questions / of each question's options every time an exam starts
+const [EXPLAIN, HIDE, SHOW, NOQ, RANDQ, RANDA] = [0, 1, 2, 3, 4, 5];
+
+/** a shuffled copy (Fisher-Yates) */
+const shuffled = (list) => {
+  const a = [...list];
+  for (let k = a.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [a[k], a[j]] = [a[j], a[k]]; }
+  return a;
+};
 const KEYS = [["A–D, F", "choose option (or 1–6)"], ["↑ / ↓", "move"], ["Space", "choose / toggle"], ["Enter", "choose / check / next"],
   ["S", "show answer"], ["E", "explain"], ["I", "enlarge picture"], ["← / →", "previous / next question (also P / N)"],
   ["R", "review all questions"], ["H", "hide help"], ["Q, Esc", "quit to the exam list"]];
@@ -449,10 +459,14 @@ let screen = "menu";
 let exam, states, i, help, review, reviewed, quitting, bigPic;
 
 function start(e) {
-  exam = e;
+  // src: the question's number in the file, shown as "SOURCE Q12" when the order is random
+  let qs = e.questions.map((q, k) => ({ ...q, src: k }));
+  if (opts[RANDQ]) qs = shuffled(qs);
+  if (opts[RANDA]) qs = qs.map((q) => (q.shuffle === false ? q : { ...q, choices: shuffled(q.choices) }));
+  exam = { ...e, questions: qs };
   // http_pro starts every question with nothing chosen, as its answer sheet shows
   const blank = (q) => ({ ...newState(q), picks: q.choices.map(() => false) });
-  states = e.questions.map(opts[SHOW] ? withAnswer : skin === "http_pro" ? blank : newState);
+  states = exam.questions.map(opts[SHOW] ? withAnswer : skin === "http_pro" ? blank : newState);
   [i, help, review, reviewed, quitting, bigPic] = [0, false, null, false, false, false];
   screen = "exam";
   renderExam(true);
@@ -483,7 +497,7 @@ function renderExamPro(top) {
   let right = 0, wrong = 0, left = 0;
   exam.questions.forEach((x, k) => { if (!states[k].submitted) left++; else if (isRight(x, states[k])) right++; else wrong++; });
   const many = q.choices.filter((c) => c.correct).length;
-  const kind = (q.type === "single" ? "" : `CHOOSE ${many} · `) + `SOURCE Q${i + 1}`;
+  const kind = (q.type === "single" ? "" : `CHOOSE ${many} · `) + `SOURCE Q${(q.src ?? i) + 1}`;
   let h = `<div class="pro-top"><button class="home" data-act="KeyQ" title="back to the exam list">${HOME}</button>` +
     `<span class="pro-title">${esc(exam.title)}</span><span class="dim">${esc(OPTIONS.filter((_, k) => opts[k]).join(" · "))}</span></div>`;
   h += `<div class="pro-body"><section class="pro-card">`;
@@ -513,7 +527,7 @@ function renderExamPro(top) {
   if (!proFold[0]) {
     h += `<div class="pro-stats"><div><span>Correct</span><b class="ok">${reveal ? right : "–"}</b></div>` +
       `<div><span>Wrong</span><b>${reveal ? wrong : "–"}</b></div><div><span>Left</span><b>${left}</b></div></div>` +
-      `<div class="pro-note">All ${n} questions · original order</div>`;
+      `<div class="pro-note">All ${n} questions · ${opts[RANDQ] ? "random" : "original"} order</div>`;
   }
   h += `</div><div class="pro-panel sheet"><div class="pro-sheet-title"${proFold[1] ? ' style="border:0"' : ""}><span>Answer sheet</span>` +
     `<button class="fold" data-fold="1" title="fold">${proFold[1] ? "+" : "-"}</button></div>`;
@@ -545,7 +559,8 @@ function renderExam(top) {
   if (skin === "http_pro") return renderExamPro(top);
   const q = exam.questions[i], s = states[i], n = exam.questions.length;
   const reveal = !opts[HIDE] || reviewed;
-  const kind = q.type === "single" ? "single-choice" : `multiple-choice (choose ${q.choices.filter((c) => c.correct).length})`;
+  const kind = (q.type === "single" ? "single-choice" : `multiple-choice (choose ${q.choices.filter((c) => c.correct).length})`) +
+    (opts[RANDQ] ? ` · file Q${q.src + 1}` : "");
   let h = `<div class="h1">${esc(header())}</div><div class="h2">${kind}</div><hr>`;
   h += fmt(opts[NOQ] ? `Q${i + 1}.` : `Q${i + 1}. ${q.text}`, "text");
   if (!opts[NOQ] && q.image.startsWith("data:image")) h += `<img class="pic${bigPic ? " big" : ""}" src="${esc(q.image)}" alt="picture" data-act="KeyI">`;
